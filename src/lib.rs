@@ -15,6 +15,7 @@ impl Arch for RX {
     type Operand = Operand;
 }
 
+#[derive(Debug)]
 pub struct Instruction {
     opcode: Opcode,
     operands: [Operand; 3],
@@ -27,11 +28,23 @@ impl Instruction {
     }
 
     pub fn operands(&self) -> &[Operand] {
-        &self.operands[self.operand_count()]
+        &self.operands[..self.operand_count() as usize]
     }
 
     pub fn length(&self) -> u8 {
         self.length
+    }
+
+    fn operand_count(&self) -> u8 {
+        let mut operands = 0;
+        for op in self.operands.iter() {
+            if op == &Operand::Nothing {
+                return operands;
+            }
+            operands += 1;
+        }
+
+        operands
     }
 }
 
@@ -78,11 +91,6 @@ impl yaxpeax_arch::Instruction for Instruction {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum SizeSpec {
-    B, W, L,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PSWBit {
     C,
     Z,
@@ -92,9 +100,23 @@ pub enum PSWBit {
     U,
 }
 
+impl fmt::Display for PSWBit {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            PSWBit::C => f.write_str("c"),
+            PSWBit::Z => f.write_str("z"),
+            PSWBit::S => f.write_str("s"),
+            PSWBit::O => f.write_str("o"),
+            PSWBit::I => f.write_str("i"),
+            PSWBit::U => f.write_str("u"),
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ControlReg {
     PSW,
+    PC,
     USP,
     FPSW,
     BPSW,
@@ -102,27 +124,96 @@ pub enum ControlReg {
     ISP,
     FINTV,
     INTB,
-    EXTB
+    EXTB,
+    DPSW,
+    DCMR,
+    DECNT,
+    DEPC,
+}
+
+impl fmt::Display for ControlReg {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ControlReg::PSW => f.write_str("psw"),
+            ControlReg::PC => f.write_str("pc"),
+            ControlReg::USP => f.write_str("usp"),
+            ControlReg::FPSW => f.write_str("fpsw"),
+            ControlReg::BPSW => f.write_str("bpsw"),
+            ControlReg::BPC => f.write_str("bpc"),
+            ControlReg::ISP => f.write_str("isp"),
+            ControlReg::FINTV => f.write_str("fintv"),
+            ControlReg::INTB => f.write_str("intb"),
+            ControlReg::EXTB => f.write_str("extb"),
+            ControlReg::DPSW => f.write_str("dpsw"),
+            ControlReg::DCMR => f.write_str("dcmr"),
+            ControlReg::DECNT => f.write_str("decnt"),
+            ControlReg::DEPC => f.write_str("DEPC")
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct BitfieldSpec {
+    bits: u16,
+}
+
+impl fmt::Display for BitfieldSpec {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "#{}, #{}, #{}", self.source_start_bit(), self.destination_start_bit(), self.width())
+    }
+}
+
+impl BitfieldSpec {
+    /// the least-significant bit to start moving from the source operand. this is also described
+    /// as `slsb` in the `rx` manuals.
+    fn source_start_bit(&self) -> u8 {
+        let dslb_and_slsb = ((self.bits >> 10) & 0b11111) as u8;
+        self.destination_start_bit().wrapping_sub(dslb_and_slsb) & 0x1f
+    }
+
+    /// the least-significant bit to start moving into in the destination operand. this is also
+    /// described as `dlsb` in the `rx` manuals.
+    fn destination_start_bit(&self) -> u8 {
+        ((self.bits >> 5) & 0b11111) as u8
+    }
+
+    /// the number of bits to move from the source operand to the destination operand.
+    fn width(&self) -> u8 {
+        let dslb_and_width = ((self.bits >> 10) & 0b11111) as u8;
+        dslb_and_width.wrapping_sub(self.destination_start_bit()) & 0x1f
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Operand {
+    Nothing,
     /// one of the 16 32-bit general purpose registers: `R0 (sp)` through `R15`.
     Register { num: u8 },
+    /// a range of registers, from `start_gpr` to `end_gpr`
+    RegisterRange { start_gpr: u8, end_gpr: u8 },
     /// one of the 16 32-bit general purpose registers, but a smaller part of it. typically
     /// sign-extended to 32b for processing.
     Subreg { num: u8, width: SizeCode },
+    Accumulator { num: u8 },
+    /// `bfmov` and `bfmovz`, textually, describe the bitfield to be moved with three parameters.
+    /// those three parameters are expressed as this one operand.
+    BitfieldSpec { bf_spec: BitfieldSpec },
     /// one of the 16 64-bit double-precision floating point registers: `DR0` through `DR15`.
     DoubleReg { num: u8 },
     DoubleRegLow { num: u8 },
     DoubleRegHigh { num: u8 },
     ControlReg { reg: ControlReg },
+    PSWBit { bit: PSWBit },
     Deref { gpr: u8, disp: u32, width: SizeCode },
     DerefIndexed { base: u8, index: u8, width: SizeCode },
     DoubleRegisterRange { start_reg: u8, end_reg: u8 },
     DoubleControlRegisterRange { start_reg: u8, end_reg: u8 },
-    ImmS(u8),
+    BrS(u8),
     ImmB { imm: u8 },
+    ImmW { imm: u16 },
+    /// a 24-bit immediate. this is used as a branch offset, and is treated as a sign-extended
+    /// 24-bit value, so it is represented as that extended form here.
+    BrA { offset: i32 },
     ImmL { imm: u32 },
 }
 
@@ -150,49 +241,458 @@ impl SizeCode {
 impl fmt::Display for Operand {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Operand::GPR { num } => {
+            Operand::Nothing => {
+                f.write_str("")
+            },
+            Operand::Register { num } => {
                 write!(f, "r{}", num)
             },
-            Operand::ControlRg { reg } => {
+            Operand::RegisterRange { start_gpr, end_gpr } => {
+                write!(f, "r{}-r{}", start_gpr, end_gpr)
+            }
+            Operand::Subreg { num, width: _unused } => {
+                // the width of this register is communicated, textually, by a suffix on the
+                // mnemonic...
+                write!(f, "r{}", num)
+            }
+            Operand::Accumulator { num } => {
+                write!(f, "a{}", num)
+            },
+            Operand::BitfieldSpec { bf_spec } => {
+                fmt::Display::fmt(bf_spec, f)
+            }
+            Operand::DoubleReg { num } => {
+                write!(f, "dr{}", num)
+            },
+            Operand::DoubleRegLow { num } => {
+                write!(f, "drl{}", num)
+            },
+            Operand::DoubleRegHigh { num } => {
+                write!(f, "drh{}", num)
+            },
+            Operand::ControlReg { reg } => {
                 fmt::Display::fmt(reg, f)
             },
+            Operand::PSWBit { bit } => {
+                fmt::Display::fmt(bit, f)
+            }
             Operand::Deref { gpr, disp, .. } => {
-                if disp == 0 {
+                if *disp == 0 {
                     write!(f, "[r{}]", gpr)
                 } else {
                     write!(f, "{}[r{}]", disp, gpr)
                 }
             },
-            Operand::RegisterRange { start_gpr, end_gpr } => {
-                write!(f, "r{}-r{}", start_gpr, end_gpr)
+            Operand::DerefIndexed { base, index, .. } => {
+                // `ri` *is* scaled by the size of the access, but this is communicated as a suffix
+                // on the instruction...
+                write!(f, "[r{}, r{}]", base, index)
+            }
+            Operand::DoubleRegisterRange { start_reg, end_reg } => {
+                write!(f, "dr{}-dr{}", start_reg, end_reg)
+            }
+            Operand::DoubleControlRegisterRange { start_reg, end_reg } => {
+                // TODO: give the control registers names...
+                write!(f, "dcr{}-dcr{}", start_reg, end_reg)
+            }
+            Operand::BrS(disp) => {
+                // a short branch `disp` bytes forward
+                write!(f, "$+{}", disp)
+            }
+            Operand::BrA { offset } => {
+                // a branch by signed `offset` bytes
+                write!(f, "$+{}", offset)
+            }
+            Operand::ImmB { imm } => {
+                write!(f, "#{}", imm)
+            }
+            Operand::ImmW { imm } => {
+                write!(f, "#{}", imm)
+            }
+            Operand::ImmL { imm } => {
+                write!(f, "#{}", imm)
             }
         }
     }
 }
 
+#[allow(non_camel_case_types)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Opcode {
+    REVW,
+    REVL,
+    MSBHI,
+    MSBLH,
+    MSBLO,
+    EMSBA,
+    MVFACHI,
+    MVFACLO,
+    MVFACMI,
+    MVFACGU,
+    RACW,
+    RACL,
+    RDACW,
+    RDACL,
+    MVTACHI,
+    MVTACLO,
+    MVTACGU,
+    XOR,
+    OR,
+    AND,
+    MUL,
+    ADD,
+    SUB,
+    MOVU,
+    SHLL,
+    SHAR,
+    SHLR,
     BRA,
-    SUNTIL_B,
-    SUNTIL_W,
-    SUNTIL_L,
     NOP,
+    MOV,
+    DMOV,
+    ROTR,
+    ROTL,
+    SCEQ,
+    SCNE,
+    SCGEU,
+    SCLTU,
+    SCGTU,
+    SCLEU,
+    SCPZ,
+    SCN,
+    SCGE,
+    SCLT,
+    SCGT,
+    SCLE,
+    SCO,
+    SCNO,
+    BMEQ,
+    BMNE,
+    BMGEU,
+    BMLTU,
+    BMGTU,
+    BMLEU,
+    BMPZ,
+    BMN,
+    BMGE,
+    BMLT,
+    BMGT,
+    BMLE,
+    BMO,
+    BMNO,
+    BNOT,
     FSUB,
     FCMP,
     FADD,
     FMUL,
-    MOV,
-    DMOV,
+    FDIV,
+    MVFC,
+    MVFDC,
+    MVTC,
+    MVTDC,
+    STNZ,
+    STZ,
+    TST,
+    DIVU,
+    DIV,
+    EMULU,
+    EMUL,
+    MIN,
+    MAX,
+    ITOD,
+    FTOD,
+    UTOD,
+    ADC,
+    RSTR,
+    SAVE,
+    MULHI,
+    MULLO,
+    MULLH,
+    EMULA,
+    MACHI,
+    MACLO,
+    MACLH,
+    EMACA,
+    FTOI,
+    ITOF,
+    FTOU,
+    UTOF,
+    FSQRT,
+    ROUND,
+    BSET,
+    BCLR,
+    BTST,
+    BFMOV,
+    BFMOVZ,
+    ABS,
+    NOT,
+    XCHG,
+    SBB,
+    RTFI,
+    RTE,
+    WAIT,
+    SETPSW,
+    CLRPSW,
+    RMPA_B,
+    RMPA_W,
+    RMPA_L,
+    SMOVF,
+    SATR,
+    SSTR_B,
+    SSTR_W,
+    SSTR_L,
+    SMOVB,
+    SWHILE_B,
+    SWHILE_W,
+    SWHILE_L,
+    SMOVU,
+    SUNTIL_B,
+    SUNTIL_W,
+    SUNTIL_L,
+    SCMPU,
+    JMP,
+    JSR,
+    POP,
+    POPC,
+    POPM,
+    PUSH,
+    PUSHC,
+    PUSHM,
+    RORC,
+    ROLC,
+    NEG,
+    DPUSHM,
+    DPOP,
+    DTOF,
+    DROUND,
+    DSQRT,
+    DTOI,
+    DTOU,
+    DABS,
+    DNEG,
+    DADD,
+    DSUB,
+    DMUL,
+    DDIV,
+    DCMPUN,
+    DCMPEQ,
+    DCMPLT,
+    DCMPLE,
+    INT,
+    MVTIPL,
+    MVFDR,
+    CMP,
+    SAT,
+    RTSD,
+    BSR,
+    BRK,
+    BEQ,
+    BNE,
+    BGEU,
+    BLTU,
+    BGTU,
+    BLEU,
+    BPZ,
+    BN,
+    BGE,
+    BLT,
+    BGT,
+    BLE,
+    BO,
+    BNO,
+    RTS,
 }
 
 impl fmt::Display for Opcode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Opcode::REVW => f.write_str("revw"),
+            Opcode::REVL => f.write_str("revl"),
+            Opcode::MSBHI => f.write_str("msbhi"),
+            Opcode::MSBLH => f.write_str("msblh"),
+            Opcode::MSBLO => f.write_str("msblo"),
+            Opcode::EMSBA => f.write_str("emsba"),
+            Opcode::MVFACHI => f.write_str("mvfachi"),
+            Opcode::MVFACLO => f.write_str("mvfaclo"),
+            Opcode::MVFACMI => f.write_str("mvfacmi"),
+            Opcode::MVFACGU => f.write_str("mvfacgu"),
+            Opcode::RACW => f.write_str("racw"),
+            Opcode::RACL => f.write_str("racl"),
+            Opcode::RDACW => f.write_str("rdacw"),
+            Opcode::RDACL => f.write_str("rdacl"),
+            Opcode::MVTACHI => f.write_str("mvtachi"),
+            Opcode::MVTACLO => f.write_str("mvtaclo"),
+            Opcode::MVTACGU => f.write_str("mvtacgu"),
+            Opcode::XOR => f.write_str("xor"),
+            Opcode::OR => f.write_str("or"),
+            Opcode::AND => f.write_str("and"),
+            Opcode::MUL => f.write_str("mul"),
+            Opcode::ADD => f.write_str("add"),
+            Opcode::SUB => f.write_str("sub"),
+            Opcode::MOVU => f.write_str("movu"),
+            Opcode::SHLL => f.write_str("shll"),
+            Opcode::SHAR => f.write_str("shar"),
+            Opcode::SHLR => f.write_str("shlr"),
+            Opcode::BRA => f.write_str("bra"),
+            Opcode::NOP => f.write_str("nop"),
+            Opcode::MOV => f.write_str("mov"),
+            Opcode::DMOV => f.write_str("dmov"),
+            Opcode::ROTR => f.write_str("rotr"),
+            Opcode::ROTL => f.write_str("rotl"),
+            Opcode::SCEQ => f.write_str("sceq"),
+            Opcode::SCNE => f.write_str("scne"),
+            Opcode::SCGEU => f.write_str("scgeu"),
+            Opcode::SCLTU => f.write_str("scltu"),
+            Opcode::SCGTU => f.write_str("scgtu"),
+            Opcode::SCLEU => f.write_str("scleu"),
+            Opcode::SCPZ => f.write_str("scpz"),
+            Opcode::SCN => f.write_str("scn"),
+            Opcode::SCGE => f.write_str("scge"),
+            Opcode::SCLT => f.write_str("sclt"),
+            Opcode::SCGT => f.write_str("scgt"),
+            Opcode::SCLE => f.write_str("scle"),
+            Opcode::SCO => f.write_str("sco"),
+            Opcode::SCNO => f.write_str("scno"),
+            Opcode::BMEQ => f.write_str("bmeq"),
+            Opcode::BMNE => f.write_str("bmne"),
+            Opcode::BMGEU => f.write_str("bmgeu"),
+            Opcode::BMLTU => f.write_str("bmltu"),
+            Opcode::BMGTU => f.write_str("bmgtu"),
+            Opcode::BMLEU => f.write_str("bmleu"),
+            Opcode::BMPZ => f.write_str("bmpz"),
+            Opcode::BMN => f.write_str("bmn"),
+            Opcode::BMGE => f.write_str("bmge"),
+            Opcode::BMLT => f.write_str("bmlt"),
+            Opcode::BMGT => f.write_str("bmgt"),
+            Opcode::BMLE => f.write_str("bmle"),
+            Opcode::BMO => f.write_str("bmo"),
+            Opcode::BMNO => f.write_str("bmno"),
+            Opcode::BNOT => f.write_str("bnot"),
+            Opcode::FSUB => f.write_str("fsub"),
+            Opcode::FCMP => f.write_str("fcmp"),
+            Opcode::FADD => f.write_str("fadd"),
+            Opcode::FMUL => f.write_str("fmul"),
+            Opcode::FDIV => f.write_str("fdiv"),
+            Opcode::MVFC => f.write_str("mvfc"),
+            Opcode::MVFDC => f.write_str("mvfdc"),
+            Opcode::MVTC => f.write_str("mvtc"),
+            Opcode::MVTDC => f.write_str("mvtdc"),
+            Opcode::STNZ => f.write_str("stnz"),
+            Opcode::STZ => f.write_str("stz"),
+            Opcode::TST => f.write_str("tst"),
+            Opcode::DIVU => f.write_str("divu"),
+            Opcode::DIV => f.write_str("div"),
+            Opcode::EMULU => f.write_str("emulu"),
+            Opcode::EMUL => f.write_str("emul"),
+            Opcode::MIN => f.write_str("min"),
+            Opcode::MAX => f.write_str("max"),
+            Opcode::ITOD => f.write_str("itod"),
+            Opcode::FTOD => f.write_str("ftod"),
+            Opcode::UTOD => f.write_str("utod"),
+            Opcode::ADC => f.write_str("adc"),
+            Opcode::RSTR => f.write_str("rstr"),
+            Opcode::SAVE => f.write_str("save"),
+            Opcode::MULHI => f.write_str("mulhi"),
+            Opcode::MULLO => f.write_str("mullo"),
+            Opcode::MULLH => f.write_str("mullh"),
+            Opcode::EMULA => f.write_str("emula"),
+            Opcode::MACHI => f.write_str("machi"),
+            Opcode::MACLO => f.write_str("maclo"),
+            Opcode::MACLH => f.write_str("maclh"),
+            Opcode::EMACA => f.write_str("emaca"),
+            Opcode::FTOI => f.write_str("ftoi"),
+            Opcode::ITOF => f.write_str("itof"),
+            Opcode::FTOU => f.write_str("ftou"),
+            Opcode::UTOF => f.write_str("utof"),
+            Opcode::FSQRT => f.write_str("fsqrt"),
+            Opcode::ROUND => f.write_str("round"),
+            Opcode::BSET => f.write_str("bset"),
+            Opcode::BCLR => f.write_str("bclr"),
+            Opcode::BTST => f.write_str("btst"),
+            Opcode::BFMOV => f.write_str("bfmov"),
+            Opcode::BFMOVZ => f.write_str("bfmovz"),
+            Opcode::ABS => f.write_str("abs"),
+            Opcode::NOT => f.write_str("not"),
+            Opcode::XCHG => f.write_str("xchg"),
+            Opcode::SBB => f.write_str("sbb"),
+            Opcode::RTFI => f.write_str("rtfi"),
+            Opcode::RTE => f.write_str("rte"),
+            Opcode::WAIT => f.write_str("wait"),
+            Opcode::SETPSW => f.write_str("setpsw"),
+            Opcode::CLRPSW => f.write_str("clrpsw"),
+            Opcode::RMPA_B => f.write_str("rmpa_b"),
+            Opcode::RMPA_W => f.write_str("rmpa_w"),
+            Opcode::RMPA_L => f.write_str("rmpa_l"),
+            Opcode::SMOVF => f.write_str("smovf"),
+            Opcode::SATR => f.write_str("satr"),
+            Opcode::SSTR_B => f.write_str("sstr_b"),
+            Opcode::SSTR_W => f.write_str("sstr_w"),
+            Opcode::SSTR_L => f.write_str("sstr_l"),
+            Opcode::SMOVB => f.write_str("smovb"),
+            Opcode::SWHILE_B => f.write_str("swhile_b"),
+            Opcode::SWHILE_W => f.write_str("swhile_w"),
+            Opcode::SWHILE_L => f.write_str("swhile_l"),
+            Opcode::SMOVU => f.write_str("smovu"),
+            Opcode::SUNTIL_B => f.write_str("suntil_b"),
+            Opcode::SUNTIL_W => f.write_str("suntil_w"),
+            Opcode::SUNTIL_L => f.write_str("suntil_l"),
+            Opcode::SCMPU => f.write_str("scmpu"),
+            Opcode::JMP => f.write_str("jmp"),
+            Opcode::JSR => f.write_str("jsr"),
+            Opcode::POP => f.write_str("pop"),
+            Opcode::POPC => f.write_str("popc"),
+            Opcode::POPM => f.write_str("popm"),
+            Opcode::PUSH => f.write_str("push"),
+            Opcode::PUSHC => f.write_str("pushc"),
+            Opcode::PUSHM => f.write_str("pushm"),
+            Opcode::RORC => f.write_str("rorc"),
+            Opcode::ROLC => f.write_str("rolc"),
+            Opcode::NEG => f.write_str("neg"),
+            Opcode::DPUSHM => f.write_str("dpushm"),
+            Opcode::DPOP => f.write_str("dpop"),
+            Opcode::DTOF => f.write_str("dtof"),
+            Opcode::DROUND => f.write_str("dround"),
+            Opcode::DSQRT => f.write_str("dsqrt"),
+            Opcode::DTOI => f.write_str("dtoi"),
+            Opcode::DTOU => f.write_str("dtou"),
+            Opcode::DABS => f.write_str("dabs"),
+            Opcode::DNEG => f.write_str("dneg"),
+            Opcode::DADD => f.write_str("dadd"),
+            Opcode::DSUB => f.write_str("dsub"),
+            Opcode::DMUL => f.write_str("dmul"),
+            Opcode::DDIV => f.write_str("ddiv"),
+            Opcode::DCMPUN => f.write_str("dcmpun"),
+            Opcode::DCMPEQ => f.write_str("dcmpeq"),
+            Opcode::DCMPLT => f.write_str("dcmplt"),
+            Opcode::DCMPLE => f.write_str("dcmple"),
+            Opcode::INT => f.write_str("int"),
+            Opcode::MVTIPL => f.write_str("mvtipl"),
+            Opcode::MVFDR => f.write_str("mvfdr"),
+            Opcode::CMP => f.write_str("cmp"),
+            Opcode::SAT => f.write_str("sat"),
+            Opcode::RTSD => f.write_str("rtsd"),
+            Opcode::BSR => f.write_str("bsr"),
+            Opcode::BRK => f.write_str("brk"),
+            Opcode::BEQ => f.write_str("beq"),
+            Opcode::BNE => f.write_str("bne"),
+            Opcode::BGEU => f.write_str("bgeu"),
+            Opcode::BLTU => f.write_str("bltu"),
+            Opcode::BGTU => f.write_str("bgtu"),
+            Opcode::BLEU => f.write_str("bleu"),
+            Opcode::BPZ => f.write_str("bpz"),
+            Opcode::BN => f.write_str("bn"),
+            Opcode::BGE => f.write_str("bge"),
+            Opcode::BLT => f.write_str("blt"),
+            Opcode::BGT => f.write_str("bgt"),
+            Opcode::BLE => f.write_str("ble"),
+            Opcode::BO => f.write_str("bo"),
+            Opcode::BNO => f.write_str("bno"),
+            Opcode::RTS => f.write_str("rts"),
         }
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord)]
 #[repr(u8)]
 pub enum RxVersion {
     V1,
@@ -202,11 +702,9 @@ pub enum RxVersion {
 
 impl PartialOrd for RxVersion {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        (self as u8).partial_cmp(other)
+        (*self as u8).partial_cmp(&(*other as u8))
     }
 }
-
-impl Ord for RxVersion {}
 
 #[test]
 fn versions_compare_right() {
@@ -289,7 +787,7 @@ trait DecodeHandler<T: Reader<<RX as Arch>::Address, <RX as Arch>::Word>> {
         words.next_n(&mut buf).ok().ok_or(StandardDecodeError::ExhaustedInput)?;
         self.on_word_read(buf[0]);
         self.on_word_read(buf[1]);
-        Ok(u16::from_le_bytes(buf));
+        Ok(u16::from_le_bytes(buf))
     }
     #[inline(always)]
     fn read_u24(&mut self, words: &mut T) -> Result<u32, <RX as Arch>::DecodeError> {
@@ -300,7 +798,12 @@ trait DecodeHandler<T: Reader<<RX as Arch>::Address, <RX as Arch>::Word>> {
         self.on_word_read(buf[0]);
         self.on_word_read(buf[1]);
         self.on_word_read(buf[2]);
-        Ok(u32::from_le_bytes(buf));
+        Ok(u32::from_le_bytes(buf))
+    }
+    #[inline(always)]
+    fn read_i24(&mut self, words: &mut T) -> Result<i32, <RX as Arch>::DecodeError> {
+        let v = self.read_u24(words)?;
+        Ok(((v as i32) << 8) >> 8)
     }
     #[inline(always)]
     fn read_u32(&mut self, words: &mut T) -> Result<u32, <RX as Arch>::DecodeError> {
@@ -310,7 +813,7 @@ trait DecodeHandler<T: Reader<<RX as Arch>::Address, <RX as Arch>::Word>> {
         self.on_word_read(buf[1]);
         self.on_word_read(buf[2]);
         self.on_word_read(buf[3]);
-        Ok(u32::from_le_bytes(buf));
+        Ok(u32::from_le_bytes(buf))
     }
     /// helper to decode the bits for an `ld`-style operand, with variants like "deref", "deref
     /// with displacement", and "deref with larger displacement", into an `Operand`.
@@ -321,25 +824,25 @@ trait DecodeHandler<T: Reader<<RX as Arch>::Address, <RX as Arch>::Word>> {
     /// cases are that either size!=L would trap, or is ignored and means full register width
     /// regardless.
     fn decode_mem_op(&mut self, rs: u8, ld: u8, size: SizeCode, words: &mut T) -> Result<Operand, <RX as Arch>::DecodeError> {
-        match ld {
+        Ok(match ld {
             0b00 => {
-                Operand::Deref { gpr: rs, disp: 0, size }
+                Operand::Deref { gpr: rs, disp: 0, width: size }
             },
             0b01 => {
                 let disp = self.read_u8(words)? as u32;
-                Operand::Deref { gpr: rs, disp, size }
+                Operand::Deref { gpr: rs, disp, width: size }
             }
             0b10 => {
                 let disp = self.read_u16(words)? as u32;
-                Operand::Deref { gpr: rs, disp, size }
+                Operand::Deref { gpr: rs, disp, width: size }
             }
             _ => {
                 // callers (should all be internal) should never pass larger `ld`..
                 // it's not clear how ``
                 debug_assert!(ld == 0b11);
-                Operand::GPR { num: rs }
+                Operand::Register { num: rs }
             }
-        }
+        })
     }
     fn on_decode_start(&mut self) {}
     fn on_decode_end(&mut self) {}
@@ -369,6 +872,7 @@ impl<T: yaxpeax_arch::Reader<<RX as Arch>::Address, <RX as Arch>::Word>> DecodeH
 
 impl Decoder<RX> for InstDecoder {
     fn decode_into<T: Reader<<RX as Arch>::Address, <RX as Arch>::Word>>(&self, inst: &mut Instruction, words: &mut T) -> Result<(), <RX as Arch>::DecodeError> {
+        decode_inst(self, inst, words)
     }
 }
 
@@ -378,23 +882,25 @@ fn decode_inst<
 >(decoder: &<RX as Arch>::Decoder, handler: &mut H, words: &mut T) -> Result<(), <RX as Arch>::DecodeError> {
     handler.on_decode_start();
 
-    let b: u8 = handler.read_u8(words)?;
+    let opc: u8 = handler.read_u8(words)?;
 
-    if b == 0b0000_0000 {
+    if opc == 0b0000_0000 {
         handler.on_opcode_decoded(Opcode::BRK)?;
-    } else if b == 0b0000_0001 {
+    } else if opc == 0b0000_0001 {
         return Err(StandardDecodeError::InvalidOpcode);
-    } else if b == 0b0000_0010 {
+    } else if opc == 0b0000_0010 {
         handler.on_opcode_decoded(Opcode::RTS)?;
-    } else if b == 0b0000_0011 {
+    } else if opc == 0b0000_0011 {
         handler.on_opcode_decoded(Opcode::NOP)?;
-    } else if b == 0b0000_0100 {
+    } else if opc == 0b0000_0100 {
         handler.on_opcode_decoded(Opcode::BRA)?;
-        handler.on_operand_decoded(0, Operand::ImmA(handler.read_u24(words)?))?;
-    } else if b == 0b0000_0101 {
+        let offset = handler.read_i24(words)?;
+        handler.on_operand_decoded(0, Operand::BrA { offset })?;
+    } else if opc == 0b0000_0101 {
         handler.on_opcode_decoded(Opcode::BSR)?;
-        handler.on_operand_decoded(0, Operand::ImmA(handler.read_u24(words)?))?;
-    } else if b == 0b0000_0110 {
+        let offset = handler.read_i24(words)?;
+        handler.on_operand_decoded(0, Operand::BrA { offset })?;
+    } else if opc == 0b0000_0110 {
         let next: u8 = handler.read_u8(words)?;
         let mi = (next >> 6) & 0b11;
         let ld = next & 0b11;
@@ -403,7 +909,7 @@ fn decode_inst<
         if opc < 0b0110 {
             const OPC_TABLE: [Opcode; 6] = [Opcode::SUB, Opcode::CMP, Opcode::ADD, Opcode::MUL, Opcode::AND, Opcode::OR];
 
-            handler.on_opcode_decoded(OPC_TABLE[opc])?;
+            handler.on_opcode_decoded(OPC_TABLE[opc as usize])?;
         } else if opc == 0b1000 {
             handler.on_opcode_decoded(match next {
                 0b0_0000 => {
@@ -472,39 +978,40 @@ fn decode_inst<
         let rd = next & 0b1111;
 
         let size = [SizeCode::B, SizeCode::W, SizeCode::L, SizeCode::UW][mi as usize];
-        let src = handler.decode_mem_op(rs, ld, size, words);
+        let src = handler.decode_mem_op(rs, ld, size, words)?;
 
         handler.on_operand_decoded(0, src)?;
-        handler.on_operand_decoded(1, Operand::GPR { num: rd })?;
+        handler.on_operand_decoded(1, Operand::Register { num: rd })?;
     } else if opc == 0b0000_0111 {
         return Err(StandardDecodeError::InvalidOpcode);
     } else if opc < 0b0001_0000 {
-        handler.on_opcode_decoded(Opcode::BRA);
+        handler.on_opcode_decoded(Opcode::BRA)?;
         let disp = opc & 0b111;
         // TODO: double-check the displacement offset thingy
-        handler.on_operand_decoded(0, Operand::ImmS(disp))?;
+        handler.on_operand_decoded(0, Operand::BrS(disp))?;
     } else if opc < 0b0010_0000 {
         handler.on_opcode_decoded(if opc & 0b0000_1000 == 0 {
             Opcode::BEQ
         } else {
             Opcode::BNE
-        });
+        })?;
         let disp = opc & 0b111;
         // TODO: double-check the displacement offset thingy
-        handler.on_operand_decoded(0, Operand::ImmS(disp))?;
+        handler.on_operand_decoded(0, Operand::BrS(disp))?;
     } else if opc < 0b0011_0000 {
         // BCnd.B
         let cond = opc & 0b1111;
-        const OPC_TABLE: &'static [Opcode] = [
+        const OPC_TABLE: &'static [Opcode] = &[
             Opcode::BEQ, Opcode::BNE, Opcode::BGEU, Opcode::BLTU,
             Opcode::BGTU, Opcode::BLEU, Opcode::BPZ, Opcode::BN,
             Opcode::BGE, Opcode::BLT, Opcode::BGT, Opcode::BLE,
             Opcode::BO, Opcode::BNO, Opcode::BRA, /* no branch for cnd=1111 */
         ];
 
-        if let Some(op) = OPC_TABLE.get(cond) {
-            handler.on_opcode_decoded(op);
-            handler.on_operand_decoded(0, Operand::ImmB { imm: handler.read_u8(words)? })?;
+        if let Some(op) = OPC_TABLE.get(cond as usize) {
+            handler.on_opcode_decoded(*op)?;
+            let imm = handler.read_u8(words)?;
+            handler.on_operand_decoded(0, Operand::ImmB { imm })?;
         } else {
             return Err(StandardDecodeError::InvalidOpcode);
         }
@@ -512,16 +1019,20 @@ fn decode_inst<
         return Err(StandardDecodeError::InvalidOpcode);
     } else if opc == 0b0011_1000 {
         handler.on_opcode_decoded(Opcode::BRA)?;
-        handler.on_operand_decoded(0, Operand::ImmW(handler.read_u16(words)?))?;
+        let imm = handler.read_u16(words)?;
+        handler.on_operand_decoded(0, Operand::ImmW { imm })?;
     } else if opc == 0b0011_1001 {
         handler.on_opcode_decoded(Opcode::BSR)?;
-        handler.on_operand_decoded(0, Operand::ImmW(handler.read_u16(words)?))?;
+        let imm = handler.read_u16(words)?;
+        handler.on_operand_decoded(0, Operand::ImmW { imm })?;
     } else if opc == 0b0011_1010 {
         handler.on_opcode_decoded(Opcode::BEQ)?;
-        handler.on_operand_decoded(0, Operand::ImmW(handler.read_u16(words)?))?;
+        let imm = handler.read_u16(words)?;
+        handler.on_operand_decoded(0, Operand::ImmW { imm })?;
     } else if opc == 0b0011_1011 {
         handler.on_opcode_decoded(Opcode::BNE)?;
-        handler.on_operand_decoded(0, Operand::ImmW(handler.read_u16(words)?))?;
+        let imm = handler.read_u16(words)?;
+        handler.on_operand_decoded(0, Operand::ImmW { imm })?;
     } else if opc < 0b0011_1111 {
         // MOV.size
         handler.on_opcode_decoded(Opcode::MOV)?;
@@ -532,15 +1043,15 @@ fn decode_inst<
         match opc & 0b11 {
             0b00 => {
                 handler.on_operand_decoded(0, Operand::ImmB { imm: imm as u8 })?;
-                handler.on_operand_decoded(1, Operand::Deref { gpr: rd, disp, size: SizeCode::B })?;
+                handler.on_operand_decoded(1, Operand::Deref { gpr: rd, disp, width: SizeCode::B })?;
             }
             0b01 => {
                 handler.on_operand_decoded(0, Operand::ImmW { imm: imm as u8 as u16 })?;
-                handler.on_operand_decoded(1, Operand::Deref { gpr: rd, disp, size: SizeCode::W })?;
+                handler.on_operand_decoded(1, Operand::Deref { gpr: rd, disp, width: SizeCode::W })?;
             }
             0b10 => {
                 handler.on_operand_decoded(0, Operand::ImmL { imm: imm as u8 as u32 })?;
-                handler.on_operand_decoded(1, Operand::Deref { gpr: rd, disp, size: SizeCode::L })?;
+                handler.on_operand_decoded(1, Operand::Deref { gpr: rd, disp, width: SizeCode::L })?;
             }
             _ => { unreachable!("sz=11 is rtsd") }
         };
@@ -551,7 +1062,8 @@ fn decode_inst<
         let imm = handler.read_u8(words)?;
         let rd = operands >> 4;
         let rd2 = operands & 0b1111;
-        handler.on_operand_decoded(0, Operand::RegisterRange { start_gpr: rd, end_gpr: rd2 })?;
+        handler.on_operand_decoded(0, Operand::ImmB { imm })?;
+        handler.on_operand_decoded(1, Operand::RegisterRange { start_gpr: rd, end_gpr: rd2 })?;
     } else if opc < 0b0110_0000 {
         let code = (opc >> 2) & 0b111;
         let opcode = [
@@ -566,12 +1078,12 @@ fn decode_inst<
         let rd = operands & 0b1111;
 
         let size = [
-            SizeSpec::L, SizeSpec::L, SizeSpec::L, SizeSpec::L,
-            SizeSpec::L, SizeSpec::L, SizeSpec::B, SizeSpec::W,
+            SizeCode::L, SizeCode::L, SizeCode::L, SizeCode::L,
+            SizeCode::L, SizeCode::L, SizeCode::B, SizeCode::W,
         ][code as usize];
         let src = handler.decode_mem_op(rs, ld, size, words)?;
         handler.on_operand_decoded(0, src)?;
-        handler.on_operand_decoded(1, Operand::Register { gpr: rd })?;
+        handler.on_operand_decoded(1, Operand::Register { num: rd })?;
     } else if opc < 0b0111_0000 {
         // 0 1 1 0 ....
         let opc = opc & 0b1111;
@@ -586,7 +1098,7 @@ fn decode_inst<
                 let imm = operands >> 4;
                 let rd = operands & 0b1111;
                 handler.on_operand_decoded(0, Operand::ImmB { imm })?;
-                handler.on_operand_decoded(1, Operand::Register { gpr: rd })?;
+                handler.on_operand_decoded(1, Operand::Register { num: rd })?;
             }
         } else if opc < 0b1110 {
             // 0 1 1 0 1 ...
@@ -600,7 +1112,7 @@ fn decode_inst<
             let imm = operands >> 3;
             let rd = operands & 0b111;
             handler.on_operand_decoded(0, Operand::ImmB { imm })?;
-            handler.on_operand_decoded(1, Operand::Register { gpr: rd })?;
+            handler.on_operand_decoded(1, Operand::Register { num: rd })?;
         } else {
             // 0 1 1 0 1 1 1 x
             handler.on_opcode_decoded(if opc == 0b1110 {
@@ -632,12 +1144,12 @@ fn decode_inst<
             }
             _ => {
                 debug_assert!(li == 0b11, "li is at most the low two bits set");
-                (((handler.read_u24(words)? as i32) << 8) >> 8) as u32
+                handler.read_i24(words)? as u32
             }
         };
         handler.on_operand_decoded(0, Operand::ImmL { imm })?;
-        handler.on_operand_decoded(1, Operand::Register { gpr: rs2 })?;
-        handler.on_operand_decoded(2, Operand::Register { gpr: rd })?;
+        handler.on_operand_decoded(1, Operand::Register { num: rs2 })?;
+        handler.on_operand_decoded(2, Operand::Register { num: rd })?;
     } else if opc < 0b0111_1000 {
         // 0 1 1 1 0 1 li
         let li = opc & 0b11;
@@ -676,17 +1188,17 @@ fn decode_inst<
                 handler.read_u8(words)? as i8 as i32 as u32
             }
             0b10 => {
-                handler.read_u16(words)? as i16 as i32
+                handler.read_u16(words)? as i16 as i32 as u32
             }
             _ => {
                 debug_assert!(li == 0b11, "li is at most the low two bits set");
-                ((handler.read_u24(words)? as i32) << 8) >> 8
+                handler.read_i24(words)? as u32
             }
         };
         if let Some(op) = opcode {
             handler.on_opcode_decoded(op)?;
             handler.on_operand_decoded(0, Operand::ImmL { imm })?;
-            handler.on_operand_decoded(1, Operand::Register { gpr: rd })?;
+            handler.on_operand_decoded(1, Operand::Register { num: rd })?;
         } else {
             if opc == 0b0110 {
                 // might be `int`, depends on rd
@@ -696,7 +1208,7 @@ fn decode_inst<
                 } else {
                     return Err(StandardDecodeError::InvalidOperand);
                 }
-            } else if op == 0b0111 {
+            } else if opc == 0b0111 {
                 // might be `mvitpl`
                 if rd == 0 && (imm & 0b1111_0000 == 0) {
                     handler.on_opcode_decoded(Opcode::MVTIPL)?;
@@ -704,7 +1216,7 @@ fn decode_inst<
                 } else {
                     return Err(StandardDecodeError::InvalidOperand);
                 }
-            } else if op == 0b1001 {
+            } else if opc == 0b1001 {
                 // might be `mvfdr`, or other new double-precision instructions
                 if decoder.version < RxVersion::V3 {
                     return Err(StandardDecodeError::InvalidOpcode);
@@ -745,6 +1257,7 @@ fn decode_inst<
                             handler.on_opcode_decoded(opc)?;
                             handler.on_operand_decoded(0, Operand::DoubleReg { num: rs })?;
                             handler.on_operand_decoded(1, Operand::DoubleReg { num: rs2 })?;
+                            return Ok(());
                         }
                         0b1100 => {
                             // dmovd or a few others, depending on "rs"
@@ -759,6 +1272,7 @@ fn decode_inst<
                             handler.on_opcode_decoded(opc)?;
                             handler.on_operand_decoded(0, Operand::DoubleReg { num: rs })?;
                             handler.on_operand_decoded(1, Operand::DoubleReg { num: rd })?;
+                            return Ok(());
                         }
                         0b1101 => {
                             // dsqrt or others, depending on "rs"
@@ -775,19 +1289,20 @@ fn decode_inst<
                             handler.on_opcode_decoded(opc)?;
                             handler.on_operand_decoded(0, Operand::DoubleReg { num: rs })?;
                             handler.on_operand_decoded(1, Operand::DoubleReg { num: rd })?;
+                            return Ok(());
                         }
                         _ => {
                             return Err(StandardDecodeError::InvalidOperand);
                         }
                     };
-                    handler.on_opcode_decoded(opc)?;
+                    handler.on_opcode_decoded(opcode)?;
                     handler.on_operand_decoded(0, Operand::DoubleReg { num: rs })?;
                     handler.on_operand_decoded(1, Operand::DoubleReg { num: rs2 })?;
                     handler.on_operand_decoded(2, Operand::DoubleReg { num: rd })?;
                 } else {
                     return Err(StandardDecodeError::InvalidOperand);
                 }
-            } else if op == 0b1010 {
+            } else if opc == 0b1010 {
                 // dpushm.l/dpopm.l
                 let opc = if rd == 0b000 {
                     Opcode::DPUSHM
@@ -804,7 +1319,7 @@ fn decode_inst<
                     return Err(StandardDecodeError::InvalidOperand);
                 }
                 handler.on_operand_decoded(0, Operand::DoubleControlRegisterRange { start_reg: rs, end_reg })?;
-            } else if op == 0b1011 {
+            } else if opc == 0b1011 {
                 // dpushm.d/dpopm.d
                 let opc = if rd == 0b000 {
                     Opcode::DPUSHM
@@ -831,10 +1346,11 @@ fn decode_inst<
         let operands = handler.read_u8(words)?;
         let imm = ((opc & 1) << 4) | (operands >> 4);
         let rd = operands & 0b1111;
-        let opc = (match operands >> 1) & 0b11 {
+        let opc = match (operands >> 1) & 0b11 {
             0b00 => Opcode::BSET,
             0b01 => Opcode::BCLR,
-            0b10 => Opcode::BTST,
+            // already tested for opc=11 by the `if` above, this is opc=10
+            _ => Opcode::BTST,
         };
         handler.on_opcode_decoded(opc)?;
         handler.on_operand_decoded(0, Operand::ImmB { imm })?;
@@ -871,11 +1387,11 @@ fn decode_inst<
             }
             0b1000 => {
                 handler.on_opcode_decoded(Opcode::PUSH)?;
-                handler.on_operand_decoded(0, Operand::Subreg { num: rd, size: SizeCode::B })?;
+                handler.on_operand_decoded(0, Operand::Subreg { num: rd, width: SizeCode::B })?;
             }
             0b1001 => {
                 handler.on_opcode_decoded(Opcode::PUSH)?;
-                handler.on_operand_decoded(0, Operand::Subreg { num: rd, size: SizeCode::W })?;
+                handler.on_operand_decoded(0, Operand::Subreg { num: rd, width: SizeCode::W })?;
             }
             0b1010 => {
                 handler.on_opcode_decoded(Opcode::PUSH)?;
@@ -957,7 +1473,7 @@ fn decode_inst<
             // definitely `1 0 1 1`: `1 1 1 1` would fail the branch above
             // disp[Rs], Rd
             handler.on_opcode_decoded(Opcode::MOVU)?;
-            let sz = (opc >> 3) & 0b1 != 0 {
+            let sz = if (opc >> 3) & 0b1 != 0 {
                 SizeCode::B
             } else {
                 SizeCode::W
@@ -970,7 +1486,7 @@ fn decode_inst<
             let disphi = (opc & 0b111) << 2;
             let disp = displo | dispmid | disphi;
             handler.on_operand_decoded(0, Operand::Deref { gpr: rs, disp: disp as u32, width: sz })?;
-            handler.on_operand_decoded(1, Operand::Register { gpr: rd })?;
+            handler.on_operand_decoded(1, Operand::Register { num: rd })?;
         } else {
             handler.on_opcode_decoded(Opcode::MOV)?;
             let sz = [SizeCode::B, SizeCode::W, SizeCode::L][sz as usize];
@@ -984,40 +1500,50 @@ fn decode_inst<
                 let dispmid = (operands >> 6) & 2;
                 let disphi = (opc & 0b111) << 2;
                 let disp = displo | dispmid | disphi;
-                if opc & 0b0000_1000 {
-                    handler.on_operand_decoded(0, Operand::Register { gpr: rs })?;
+                if opc & 0b0000_1000  == 0 {
+                    handler.on_operand_decoded(0, Operand::Register { num: rs })?;
                     handler.on_operand_decoded(1, Operand::Deref { gpr: rd, disp: disp as u32, width: sz })?;
                 } else {
                     handler.on_operand_decoded(0, Operand::Deref { gpr: rs, disp: disp as u32, width: sz })?;
-                    handler.on_operand_decoded(1, Operand::Register { gpr: rd })?;
+                    handler.on_operand_decoded(1, Operand::Register { num: rd })?;
                 }
             } else {
                 // either operand may have displacement, may be mem-mem
                 let ldd = (opc >> 2) & 0b11;
                 let lds = opc & 0b11;
                 let operands = handler.read_u8(words)?;
+                let rs = operands & 0b1111;
+                let rd = operands >> 4;
+
                 match (ldd, lds) {
                     (0b11, 0b11) => {
                         // encoding 7, explicitly reg-reg, might involve sign/zero extension
-                        let source_op = if sz == SizeSpec::L {
-                            Operand::Register { gpr: rs }
+                        let source_op = if sz == SizeCode::L {
+                            Operand::Register { num: rs }
                         } else {
-                            Operand::Subreg { gpr: rs, sz }
+                            Operand::Subreg { num: rs, width: sz }
                         };
                         handler.on_operand_decoded(0, source_op)?;
-                        handler.on_operand_decoded(1, Operand::Register { gpr: rd })?;
+                        handler.on_operand_decoded(1, Operand::Register { num: rd })?;
                     }
                     (ld, 0b11) => {
-                        handler.on_operand_decoded(0, Operand::Register { gpr: rs })?;
-                        handler.on_operand_decoded(1, handler.decode_mem_op(rd, ld, sz, words)?)?;
+                        handler.on_operand_decoded(0, Operand::Register { num: rs })?;
+                        let op = handler.decode_mem_op(rd, ld, sz, words)?;
+                        handler.on_operand_decoded(1, op)?;
                     },
                     (0b11, ld) => {
-                        handler.on_operand_decoded(0, handler.decode_mem_op(rs, ld, sz, words)?)?;
-                        handler.on_operand_decoded(1, Operand::Register { gpr: rd })?;
+                        // for this one, rs and rd are reversed...
+                        let rs = operands >> 4;
+                        let rd = operands & 0b1111;
+                        let op = handler.decode_mem_op(rs, ld, sz, words)?;
+                        handler.on_operand_decoded(0, op)?;
+                        handler.on_operand_decoded(1, Operand::Register { num: rd })?;
                     },
                     (ldd, lds) => {
-                        handler.on_operand_decoded(0, handler.decode_mem_op(rs, lds, sz, words)?)?;
-                        handler.on_operand_decoded(1, handler.decode_mem_op(rd, ldd, sz, words)?)?;
+                        let op = handler.decode_mem_op(rs, lds, sz, words)?;
+                        handler.on_operand_decoded(0, op)?;
+                        let op = handler.decode_mem_op(rd, ldd, sz, words)?;
+                        handler.on_operand_decoded(1, op)?;
                     }
                 }
             }
@@ -1041,7 +1567,8 @@ fn decode_inst<
             Opcode::BCLR
         };
         handler.on_opcode_decoded(opcode)?;
-        handler.on_operand_decoded(0, operand)?;
+        handler.on_operand_decoded(0, Operand::ImmB { imm })?;
+        handler.on_operand_decoded(1, operand)?;
     } else if opc < 0b1111_1000 {
         // 1 1 1 1 0 1 x x BTST/PUSH
         let ld = opc & 0b11;
@@ -1053,7 +1580,8 @@ fn decode_inst<
         let rs = operands >> 4;
         if operands & 0b0000_1000 == 0 {
             let imm = operands & 0b111;
-            handler.on_operand_decoded(1, handler.decode_mem_op(ld, rs, SizeCode::B, words)?)?;
+            let op = handler.decode_mem_op(ld, rs, SizeCode::B, words)?;
+            handler.on_operand_decoded(1, op)?;
             handler.on_operand_decoded(0, Operand::ImmB { imm })?;
             handler.on_opcode_decoded(Opcode::BTST)?;
         } else if operands & 0b0000_1100 == 0b0000_1000 {
@@ -1064,7 +1592,8 @@ fn decode_inst<
                 _ => { unreachable!("checked for ld!=11 earlier"); }
             };
 
-            handler.on_operand_decoded(0, handler.decode_mem_op(ld, rs, sz, words)?)?;
+            let op = handler.decode_mem_op(ld, rs, sz, words)?;
+            handler.on_operand_decoded(0, op)?;
             handler.on_opcode_decoded(Opcode::PUSH)?;
         } else {
             return Err(StandardDecodeError::InvalidOperand);
@@ -1087,24 +1616,25 @@ fn decode_inst<
                 let rd = operands >> 4;
                 match operands & 0b1111 {
                     0b0000 => {
-                        handler.on_opcode_decoded(Opcode::DMOV);
+                        handler.on_opcode_decoded(Opcode::DMOV)?;
                         handler.on_operand_decoded(1, Operand::DoubleRegLow { num: rd })?;
                     },
                     0b0010 => {
-                        handler.on_opcode_decoded(Opcode::DMOV);
+                        handler.on_opcode_decoded(Opcode::DMOV)?;
                         handler.on_operand_decoded(1, Operand::DoubleRegHigh { num: rd })?;
                     },
                     0b0011 => {
                         // not really sure what makes the immediate D size here. does hardware
                         // expand the 32b float into a 64b float?
-                        handler.on_opcode_decoded(Opcode::DMOV);
+                        handler.on_opcode_decoded(Opcode::DMOV)?;
                         handler.on_operand_decoded(1, Operand::DoubleReg { num: rd })?;
                     },
                     _ => {
                         return Err(StandardDecodeError::InvalidOpcode);
                     }
                 }
-                handler.on_operand_decoded(0, Operand::ImmL { imm: handler.read_u32(words)? })?;
+                let imm = handler.read_u32(words)?;
+                handler.on_operand_decoded(0, Operand::ImmL { imm })?;
             }
         } else {
             let rd = operands >> 4;
@@ -1131,7 +1661,7 @@ fn decode_inst<
                 }
                 _ => {
                     debug_assert!(li == 0b11, "li is at most the low two bits set");
-                    (((handler.read_u24(words)? as i32) << 8) >> 8) as u32
+                    handler.read_i24(words)? as u32
                 }
             };
             handler.on_opcode_decoded(Opcode::MOV)?;
@@ -1228,7 +1758,8 @@ fn decode_inst<
                     return Err(StandardDecodeError::InvalidOpcode);
                 }
                 handler.on_opcode_decoded(Opcode::UTOF)?;
-                handler.on_operand_decoded(0, handler.decode_mem_op(ld, rs, SizeCode::L, words)?)?;
+                let op = handler.decode_mem_op(ld, rs, SizeCode::L, words)?;
+                handler.on_operand_decoded(0, op)?;
                 handler.on_operand_decoded(1, Operand::Register { num: rd })?;
             } else if opc5 < 0b11000 {
                 // 1 1 1 1 1 1 0 0 | 0 1 1 0 x x ..
@@ -1253,7 +1784,8 @@ fn decode_inst<
                 let opcode = [Opcode::BSET, Opcode::BCLR, Opcode::BTST, Opcode::BNOT][opc5 as usize & 0b11];
                 handler.on_opcode_decoded(opcode)?;
                 handler.on_operand_decoded(0, Operand::Register { num: rs })?;
-                handler.on_operand_decoded(1, handler.decode_mem_op(ld, rd, SizeCode::B, words)?)?;
+                let op = handler.decode_mem_op(ld, rd, SizeCode::B, words)?;
+                handler.on_operand_decoded(1, op)?;
             } else if opc5 == 0b11110 {
                 if decoder.version < RxVersion::V3 {
                     return Err(StandardDecodeError::InvalidOpcode);
@@ -1363,7 +1895,8 @@ fn decode_inst<
                     Opcode::SCO, Opcode::SCNO, Opcode::NOP, Opcode::NOP // "NOP" is never reached: cnd>=1110, invalid above
                 ][cnd as usize];
                 handler.on_opcode_decoded(opcode)?;
-                handler.on_operand_decoded(0, handler.decode_mem_op(ld, rd, sz, words)?)?;
+                let op = handler.decode_mem_op(ld, rd, sz, words)?;
+                handler.on_operand_decoded(0, op)?;
             } else if opc5 >= 0b11000 {
                 // 1 1 1 1 1 1 0 0 | 1 1 1 [imm3] ..
                 let operands = handler.read_u8(words)?;
@@ -1378,6 +1911,7 @@ fn decode_inst<
                 let opcode = if cnd == 0b1111 {
                     Opcode::BNOT
                 } else if cnd == 0b1110 {
+                    return Err(StandardDecodeError::InvalidOpcode);
                 } else {
                     [
                         Opcode::BMEQ, Opcode::BMNE, Opcode::BMGEU, Opcode::BMLTU,
@@ -1388,7 +1922,8 @@ fn decode_inst<
                 };
                 handler.on_opcode_decoded(opcode)?;
                 handler.on_operand_decoded(0, Operand::ImmB { imm })?;
-                handler.on_operand_decoded(1, handler.decode_mem_op(ld, rd, SizeCode::B, words)?)?;
+                let op = handler.decode_mem_op(ld, rd, SizeCode::B, words)?;
+                handler.on_operand_decoded(1, op)?;
             } else {
                 unreachable!("should be unreachable, fuzzing will tell..");
             }
@@ -1427,9 +1962,9 @@ fn decode_inst<
                     _ => Opcode::EMACA,
                 };
                 handler.on_opcode_decoded(opcode)?;
-                handler.on_operand_decoded(0, Opcode::Register { num: rs })?;
-                handler.on_operand_decoded(1, Opcode::Register { num: rs })?;
-                handler.on_operand_decoded(2, Opcode::Accumulator { num: a })?;
+                handler.on_operand_decoded(0, Operand::Register { num: rs })?;
+                handler.on_operand_decoded(1, Operand::Register { num: rs2 })?;
+                handler.on_operand_decoded(2, Operand::Accumulator { num: a })?;
             } else if opcode == 0b0001_0111 {
                 let operands = handler.read_u8(words)?;
                 let rs = operands & 0b1111;
@@ -1454,14 +1989,16 @@ fn decode_inst<
                     }
                 };
                 handler.on_opcode_decoded(opcode)?;
-                handler.on_operand_decoded(0, Opcode::Register { num: rs })?;
-                handler.on_operand_decoded(1, Opcode::Accumulator { num: a })?;
+                handler.on_operand_decoded(0, Operand::Register { num: rs })?;
+                handler.on_operand_decoded(1, Operand::Accumulator { num: a })?;
             } else if opcode & 0b1111_1110 == 0b0001_1000 {
-                // we can use the lowest bit of opcode to decide if this is racw/racl (0==r==racw)
-                let lr = opcode & 1;
+                // we can use the lowest bit of opcode to decide if this is racw/racl (0==racw)
+                let wide = opcode & 1;
 
                 let operands = handler.read_u8(words)?;
-                let rs = operands & 0b1111;
+                if operands & 0b1111 != 0 {
+                    return Err(StandardDecodeError::InvalidOperand);
+                }
                 let imm = (operands >> 4) & 0b11;
                 let opc = (operands >> 6) & 1;
                 let a = operands >> 7;
@@ -1475,13 +2012,13 @@ fn decode_inst<
                 }
 
                 let opcode = if opc == 0 {
-                    if lr == 0 { Opcode::RACW } else { Opcode::RACL }
+                    if wide == 0 { Opcode::RACW } else { Opcode::RACL }
                 } else if decoder.version >= RxVersion::V2 {
-                    if lr == 0 { Opcode::RDACW } else { Opcode::RDACL }
+                    if wide == 0 { Opcode::RDACW } else { Opcode::RDACL }
                 } else {
                     return Err(StandardDecodeError::InvalidOpcode);
                 };
-                handler.on_opcode_decoded(opcode);
+                handler.on_opcode_decoded(opcode)?;
                 handler.on_operand_decoded(0, Operand::ImmB { imm: imm + 1 })?;
                 handler.on_operand_decoded(1, Operand::Accumulator { num: a })?;
             } else if opcode & 0b1111_1110 == 0b0001_1110 {
@@ -1577,7 +2114,7 @@ fn decode_inst<
                     // can't move to pc
                     return Err(StandardDecodeError::InvalidOperand);
                 }
-                handler.on_opcode_deoded(Opcode::MVTC)?;
+                handler.on_opcode_decoded(Opcode::MVTC)?;
                 handler.on_operand_decoded(0, Operand::Register { num: rs })?;
                 handler.on_operand_decoded(1, decoder.reg_to_control_reg(cr)?)?;
             } else if opcode == 0b0110_1010 {
@@ -1585,7 +2122,7 @@ fn decode_inst<
                 let rd = operands & 0b1111;
                 let cr = operands >> 4;
 
-                handler.on_opcode_deoded(Opcode::MVFC)?;
+                handler.on_opcode_decoded(Opcode::MVFC)?;
                 handler.on_operand_decoded(0, decoder.reg_to_control_reg(cr)?)?;
                 handler.on_operand_decoded(1, Operand::Register { num: rd })?;
             } else if opcode < 0b0110_1100 {
@@ -1735,6 +2272,9 @@ fn decode_inst<
                         handler.on_operand_decoded(0, Operand::Register { num: rs })?;
                         handler.on_operand_decoded(1, Operand::DoubleReg { num: rd })?;
                     }
+                    _ => {
+                        return Err(StandardDecodeError::InvalidOpcode);
+                    }
                 }
             } else if opcode < 0b0111_0000 {
                 // any unhandled cases below 0111_0000, which need more... careful handling.
@@ -1775,7 +2315,7 @@ fn decode_inst<
                         }
                         _ => {
                             debug_assert!(li == 0b11, "li is at most the low two bits set");
-                            (((handler.read_u24(words)? as i32) << 8) >> 8) as u32
+                            handler.read_i24(words)? as u32
                         }
                     };
                     handler.on_operand_decoded(0, Operand::ImmL { imm })?;
@@ -1807,7 +2347,7 @@ fn decode_inst<
                         }
                         _ => {
                             debug_assert!(li == 0b11, "li is at most the low two bits set");
-                            (((handler.read_u24(words)? as i32) << 8) >> 8) as u32
+                            handler.read_i24(words)? as u32
                         }
                     };
                     handler.on_operand_decoded(0, Operand::ImmL { imm })?;
@@ -1828,8 +2368,9 @@ fn decode_inst<
                     handler.on_opcode_decoded(
                         [Opcode::FSUB, Opcode::FCMP, Opcode::FADD, Opcode::FMUL, Opcode::FDIV][opcode as usize]
                     )?;
-                    handler.on_operand_decoded(0, Operand::ImmL { imm: handler.read_u32(words)? })?;
-                    handler.on_operand_decoded(1, Operand::Register { num: rd });
+                    let imm = handler.read_u32(words)?;
+                    handler.on_operand_decoded(0, Operand::ImmL { imm })?;
+                    handler.on_operand_decoded(1, Operand::Register { num: rd })?;
                 } else {
                     return Err(StandardDecodeError::InvalidOpcode);
                 }
@@ -1854,7 +2395,7 @@ fn decode_inst<
                     Opcode::BMO, Opcode::BMNO, Opcode::NOP, Opcode::BNOT // "NOP" is never reached: cnd>=1110, invalid above
                 ][cnd as usize];
                 handler.on_opcode_decoded(opcode)?;
-                handler.on_operand_decoded(0, Operand::ImmB { imm })?;
+                handler.on_operand_decoded(0, Operand::ImmB { imm: imm5 })?;
                 handler.on_operand_decoded(1, Operand::Register { num: rd })?;
             } else {
                 let opcode = [Opcode::SHLR, Opcode::SHAR, Opcode::SHLL][opc as usize];
@@ -1869,7 +2410,7 @@ fn decode_inst<
         let operands = handler.read_u8(words)?;
         let next_regs = handler.read_u8(words)?;
         let ri = operands & 0b1111;
-        let rb = next_reg >> 4;
+        let rb = next_regs >> 4;
         let rd = next_regs & 0b1111;
         let sz = (operands >> 4) & 0b11;
 
@@ -1877,18 +2418,22 @@ fn decode_inst<
             return Err(StandardDecodeError::InvalidOperand);
         }
 
-        if operands < 0b0100 {
+        let sz = [SizeCode::B, SizeCode::W, SizeCode::L][sz as usize];
+
+        if operands < 0b0100_0000 {
             handler.on_opcode_decoded(Opcode::MOV)?;
-            handler.on_operand_decoded(0, Operand::Register { num: rs })?;
+            handler.on_operand_decoded(0, Operand::Register { num: rd })?;
             handler.on_operand_decoded(1, Operand::DerefIndexed { base: rb, index: ri, width: sz })?;
-        } else if operands < 0b1000 {
+        } else if operands < 0b1000_0000 {
             handler.on_opcode_decoded(Opcode::MOV)?;
             handler.on_operand_decoded(0, Operand::DerefIndexed { base: rb, index: ri, width: sz })?;
             handler.on_operand_decoded(1, Operand::Register { num: rd })?;
-        } else if operands < 0b1100 {
+        } else if operands < 0b1100_0000 {
+            // 1 1 1 1 1 1 1 0 | 1 0 ..
+            // nothing encoded here
             return Err(StandardDecodeError::InvalidOpcode);
-        } else if operands < 0b1110 {
-            if sz == 0b10 {
+        } else if operands < 0b1110_0000 {
+            if sz == SizeCode::L {
                 return Err(StandardDecodeError::InvalidOperand);
             }
 
