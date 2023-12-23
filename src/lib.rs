@@ -851,7 +851,7 @@ trait DecodeHandler<T: Reader<<RX as Arch>::Address, <RX as Arch>::Word>> {
             _ => {
                 // callers (should all be internal) should never pass larger `ld`..
                 // it's not clear how ``
-                debug_assert!(ld == 0b11);
+                debug_assert_eq!(ld, 0b11);
                 Operand::Register { num: rs }
             }
         })
@@ -1592,7 +1592,7 @@ fn decode_inst<
         let rs = operands >> 4;
         if operands & 0b0000_1000 == 0 {
             let imm = operands & 0b111;
-            let op = handler.decode_mem_op(ld, rs, SizeCode::B, words)?;
+            let op = handler.decode_mem_op(rs, ld, SizeCode::B, words)?;
             handler.on_operand_decoded(1, op)?;
             handler.on_operand_decoded(0, Operand::ImmB { imm })?;
             handler.on_opcode_decoded(Opcode::BTST)?;
@@ -1604,7 +1604,7 @@ fn decode_inst<
                 _ => { unreachable!("checked for ld!=11 earlier"); }
             };
 
-            let op = handler.decode_mem_op(ld, rs, sz, words)?;
+            let op = handler.decode_mem_op(rs, ld, sz, words)?;
             handler.on_operand_decoded(0, op)?;
             handler.on_opcode_decoded(Opcode::PUSH)?;
         } else {
@@ -1660,7 +1660,7 @@ fn decode_inst<
                 return Err(StandardDecodeError::InvalidOperand);
             }
 
-            let operand = handler.decode_mem_op(ld, rd, sz, words)?;
+            let operand = handler.decode_mem_op(rd, ld, sz, words)?;
             let imm = match li {
                 0b00 => {
                     handler.read_u32(words)?
@@ -1743,7 +1743,7 @@ fn decode_inst<
                     }
                 };
                 handler.on_opcode_decoded(opcode)?;
-                let source = handler.decode_mem_op(ld, rs, SizeCode::L, words)?;
+                let source = handler.decode_mem_op(rs, ld, SizeCode::L, words)?;
                 handler.on_operand_decoded(0, source)?;
                 handler.on_operand_decoded(1, Operand::Register { num: rd })?;
             } else if opc5 < 0b10100 {
@@ -1770,7 +1770,7 @@ fn decode_inst<
                     return Err(StandardDecodeError::InvalidOpcode);
                 }
                 handler.on_opcode_decoded(Opcode::UTOF)?;
-                let op = handler.decode_mem_op(ld, rs, SizeCode::L, words)?;
+                let op = handler.decode_mem_op(rs, ld, SizeCode::L, words)?;
                 handler.on_operand_decoded(0, op)?;
                 handler.on_operand_decoded(1, Operand::Register { num: rd })?;
             } else if opc5 < 0b11000 {
@@ -1796,7 +1796,7 @@ fn decode_inst<
                 let opcode = [Opcode::BSET, Opcode::BCLR, Opcode::BTST, Opcode::BNOT][opc5 as usize & 0b11];
                 handler.on_opcode_decoded(opcode)?;
                 handler.on_operand_decoded(0, Operand::Register { num: rs })?;
-                let op = handler.decode_mem_op(ld, rd, SizeCode::B, words)?;
+                let op = handler.decode_mem_op(rd, ld, SizeCode::B, words)?;
                 handler.on_operand_decoded(1, op)?;
             } else if opc5 == 0b11110 {
                 if decoder.version < RxVersion::V3 {
@@ -1811,7 +1811,7 @@ fn decode_inst<
                     return Err(StandardDecodeError::InvalidOpcode);
                 }
                 let rd = regs >> 4;
-                let dest_op = handler.decode_mem_op(ld, rd, SizeCode::D, words)?;
+                let dest_op = handler.decode_mem_op(rd, ld, SizeCode::D, words)?;
                 let regs = handler.read_u8(words)?;
                 let rs = regs >> 4;
                 let regs_lo = regs & 0b1111;
@@ -1857,7 +1857,7 @@ fn decode_inst<
                 let regs = handler.read_u8(words)?;
                 let rs = regs >> 4;
                 let rd = regs & 0b1111;
-                let source = handler.decode_mem_op(ld, rs, SizeCode::D, words)?;
+                let source = handler.decode_mem_op(rs, ld, SizeCode::D, words)?;
                 handler.on_opcode_decoded(opcode)?;
                 handler.on_operand_decoded(0, source)?;
                 handler.on_operand_decoded(1, Operand::DoubleReg { num: rd })?;
@@ -1873,7 +1873,7 @@ fn decode_inst<
                 if operands & 0b1111 != 0b1000 {
                     return Err(StandardDecodeError::InvalidOpcode);
                 }
-                let source = handler.decode_mem_op(ld, rs, SizeCode::D, words)?;
+                let source = handler.decode_mem_op(rs, ld, SizeCode::D, words)?;
                 let operands = handler.read_u8(words)?;
                 let rd = operands >> 4;
                 if operands & 0b1111 != 0b0000 {
@@ -1907,7 +1907,7 @@ fn decode_inst<
                     Opcode::SCO, Opcode::SCNO, Opcode::NOP, Opcode::NOP // "NOP" is never reached: cnd>=1110, invalid above
                 ][cnd as usize];
                 handler.on_opcode_decoded(opcode)?;
-                let op = handler.decode_mem_op(ld, rd, sz, words)?;
+                let op = handler.decode_mem_op(rd, ld, sz, words)?;
                 handler.on_operand_decoded(0, op)?;
             } else if opc5 >= 0b11000 {
                 // 1 1 1 1 1 1 0 0 | 1 1 1 [imm3] ..
@@ -1934,7 +1934,7 @@ fn decode_inst<
                 };
                 handler.on_opcode_decoded(opcode)?;
                 handler.on_operand_decoded(0, Operand::ImmB { imm })?;
-                let op = handler.decode_mem_op(ld, rd, SizeCode::B, words)?;
+                let op = handler.decode_mem_op(rd, ld, SizeCode::B, words)?;
                 handler.on_operand_decoded(1, op)?;
             } else {
                 unreachable!("should be unreachable, fuzzing will tell..");
