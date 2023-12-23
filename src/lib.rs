@@ -1601,7 +1601,8 @@ fn decode_inst<
                 0b00 => SizeCode::B,
                 0b01 => SizeCode::W,
                 0b10 => SizeCode::L,
-                _ => { unreachable!("checked for ld!=11 earlier"); }
+                0b11 => { return Err(StandardDecodeError::InvalidOperand) },
+                _ => { unreachable!("sz is only two bits"); }
             };
 
             let op = handler.decode_mem_op(rs, ld, sz, words)?;
