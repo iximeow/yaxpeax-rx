@@ -2377,7 +2377,6 @@ fn decode_inst<
             }
         } else {
             // 1 1 1 1 1 1 0 1 | 1 ....
-            // TODO:
             let opc = (opcode >> 5) & 0b11;
             let imm5 = opcode & 0b1_1111;
 
