@@ -79,8 +79,69 @@ impl Default for Instruction {
 
 impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.opcode())?;
         let ops = self.operands();
+        let mut size = None;
+        for op in ops {
+            match op {
+                Operand::Nothing => {},
+                /// one of the 16 32-bit general purpose registers: `R0 (sp)` through `R15`.
+                Operand::Register { num: _ } => {},
+                /// a range of registers, from `start_gpr` to `end_gpr`
+                Operand::RegisterRange { start_gpr: _, end_gpr: _ } => {},
+                /// one of the 16 32-bit general purpose registers, but a smaller part of it. typically
+                /// sign-extended to 32b for processing.
+                Operand::Subreg { num: _, width } => {
+                    size = Some(*width);
+                    break;
+                },
+                Operand::Accumulator { num: _ } => {},
+                /// `bfmov` and `bfmovz`, textually, describe the bitfield to be moved with three parameters.
+                /// those three parameters are expressed as this one operand.
+                Operand::BitfieldSpec { bf_spec: _ } => {},
+                /// one of the 16 64-bit double-precision floating point registers: `DR0` through `DR15`.
+                Operand::DoubleReg { num: _ } => {},
+                Operand::DoubleRegLow { num: _ } => {},
+                Operand::DoubleRegHigh { num: _ } => {},
+                Operand::ControlReg { reg: _ } => {},
+                Operand::PSWBit { bit: _ } => {},
+                Operand::Deref { gpr: _, disp: _, width } => {
+                    size = Some(*width);
+                    break;
+                },
+                Operand::DerefIndexed { base: _, index: _, width } => {
+                    size = Some(*width);
+                    break;
+                },
+                Operand::DoubleRegisterRange { start_reg: _, end_reg: _ } => {},
+                Operand::DoubleControlRegisterRange { start_reg: _, end_reg: _ } => {},
+                Operand::ImmB { imm: _ } => {},
+                Operand::ImmW { imm: _ } => {},
+                Operand::ImmL { imm: _ }  => {},
+                Operand::BrS { offset: _ } => {
+                    size = Some(SizeCode::S);
+                    break;
+                },
+                Operand::BrB { offset: _ } => {
+                    size = Some(SizeCode::B);
+                    break;
+                },
+                Operand::BrW { offset: _ } => {
+                    size = Some(SizeCode::W);
+                    break;
+                },
+                /// a 24-bit immediate. this is used as a branch offset, and is treated as a sign-extended
+                /// 24-bit value, so it is represented as that extended form here.
+                Operand::BrA { offset: _ } => {
+                    size = Some(SizeCode::A);
+                    break;
+                },
+            }
+        }
+        write!(f, "{}", self.opcode())?;
+
+        if let Some(size) = size {
+            write!(f, ".{}", size)?;
+        }
         if let Some(op) = ops.get(0) {
             write!(f, " {}", op)?;
         }
@@ -223,13 +284,19 @@ pub enum Operand {
     DoubleRegHigh { num: u8 },
     ControlReg { reg: ControlReg },
     PSWBit { bit: PSWBit },
+    /// access to memory at the address produced by adding `gpr + disp`. in this operand, `disp` is
+    /// the exact number of bytes used for the offset access - this is in contrast to hardware,
+    /// where displacements are scaled down by the size of the scaled item.
     Deref { gpr: u8, disp: u32, width: SizeCode },
+    /// access to memory at the address produced by adding `gpr(base) + gpr(index) * size(width)`.
     DerefIndexed { base: u8, index: u8, width: SizeCode },
     DoubleRegisterRange { start_reg: u8, end_reg: u8 },
     DoubleControlRegisterRange { start_reg: u8, end_reg: u8 },
-    BrS(u8),
     ImmB { imm: u8 },
     ImmW { imm: u16 },
+    BrS { offset: u8 },
+    BrB { offset: i8 },
+    BrW { offset: i16 },
     /// a 24-bit immediate. this is used as a branch offset, and is treated as a sign-extended
     /// 24-bit value, so it is represented as that extended form here.
     BrA { offset: i32 },
@@ -238,19 +305,39 @@ pub enum Operand {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum SizeCode {
+    S,
     B,
     W,
+    A,
     L,
     D,
     UW,
 }
 
+impl fmt::Display for SizeCode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let text = match self {
+            SizeCode::S => "s",
+            SizeCode::B => "b",
+            SizeCode::W => "w",
+            SizeCode::A => "a",
+            SizeCode::L => "l",
+            SizeCode::D => "d",
+            SizeCode::UW => "uw",
+        };
+
+        f.write_str(text)
+    }
+}
+
 impl SizeCode {
     fn bytes(&self) -> u8 {
         match self {
+            SizeCode::S => 1,
             SizeCode::B => 1,
             SizeCode::W => 2,
             SizeCode::UW => 2,
+            SizeCode::A => 3,
             SizeCode::L => 4,
             SizeCode::D => 8,
         }
@@ -299,7 +386,7 @@ impl fmt::Display for Operand {
                 if *disp == 0 {
                     write!(f, "[r{}]", gpr)
                 } else {
-                    write!(f, "{}[r{}]", disp, gpr)
+                    write!(f, "{:x}h[r{}]", disp, gpr)
                 }
             },
             Operand::DerefIndexed { base, index, .. } => {
@@ -314,22 +401,42 @@ impl fmt::Display for Operand {
                 // TODO: give the control registers names...
                 write!(f, "dcr{}-dcr{}", start_reg, end_reg)
             }
-            Operand::BrS(disp) => {
+            Operand::BrS { offset } => {
                 // a short branch `disp` bytes forward
-                write!(f, "$+{}", disp)
+                write!(f, "$+{:#x}", offset)
+            }
+            Operand::BrB { offset } => {
+                // a branch by signed `offset` bytes
+                if *offset < 0 {
+                    write!(f, "$-{:#x}", -offset)
+                } else {
+                    write!(f, "$+{:#x}", offset)
+                }
+            }
+            Operand::BrW { offset } => {
+                // a branch by signed `offset` bytes
+                if *offset < 0 {
+                    write!(f, "$-{:#x}", -offset)
+                } else {
+                    write!(f, "$+{:#x}", offset)
+                }
             }
             Operand::BrA { offset } => {
                 // a branch by signed `offset` bytes
-                write!(f, "$+{}", offset)
+                if *offset < 0 {
+                    write!(f, "$-{:#x}", -offset)
+                } else {
+                    write!(f, "$+{:#x}", offset)
+                }
             }
             Operand::ImmB { imm } => {
-                write!(f, "#{}", imm)
+                write!(f, "#{:x}h", imm)
             }
             Operand::ImmW { imm } => {
-                write!(f, "#{}", imm)
+                write!(f, "#{:x}h", imm)
             }
             Operand::ImmL { imm } => {
-                write!(f, "#{}", imm)
+                write!(f, "#{:x}h", imm)
             }
         }
     }
@@ -860,11 +967,11 @@ trait DecodeHandler<T: Reader<<RX as Arch>::Address, <RX as Arch>::Word>> {
                 Operand::Deref { gpr: rs, disp: 0, width: size }
             },
             0b01 => {
-                let disp = self.read_u8(words)? as u32;
+                let disp = self.read_u8(words)? as u32 * size.bytes() as u32;
                 Operand::Deref { gpr: rs, disp, width: size }
             }
             0b10 => {
-                let disp = self.read_u16(words)? as u32;
+                let disp = self.read_u16(words)? as u32 * size.bytes() as u32;
                 Operand::Deref { gpr: rs, disp, width: size }
             }
             _ => {
@@ -1018,8 +1125,8 @@ fn decode_inst<
     } else if opc < 0b0001_0000 {
         handler.on_opcode_decoded(Opcode::BRA)?;
         let disp = opc & 0b111;
-        // TODO: double-check the displacement offset thingy
-        handler.on_operand_decoded(0, Operand::BrS(disp))?;
+        let offset = if disp < 0b11 { disp + 8 } else { disp };
+        handler.on_operand_decoded(0, Operand::BrS { offset })?;
     } else if opc < 0b0010_0000 {
         handler.on_opcode_decoded(if opc & 0b0000_1000 == 0 {
             Opcode::BEQ
@@ -1027,8 +1134,8 @@ fn decode_inst<
             Opcode::BNE
         })?;
         let disp = opc & 0b111;
-        // TODO: double-check the displacement offset thingy
-        handler.on_operand_decoded(0, Operand::BrS(disp))?;
+        let offset = if disp < 0b11 { disp + 8 } else { disp };
+        handler.on_operand_decoded(0, Operand::BrS { offset })?;
     } else if opc < 0b0011_0000 {
         // BCnd.B
         let cond = opc & 0b1111;
@@ -1039,7 +1146,11 @@ fn decode_inst<
             Opcode::BO, Opcode::BNO, Opcode::BRA, /* no branch for cnd=1111 */
         ];
 
-        if let Some(op) = OPC_TABLE.get(cond as usize) {
+        if cond == 0b1110 {
+            handler.on_opcode_decoded(Opcode::BRA)?;
+            let imm = handler.read_u8(words)?;
+            handler.on_operand_decoded(0, Operand::BrB { offset: imm as i8 })?;
+        } else if let Some(op) = OPC_TABLE.get(cond as usize) {
             handler.on_opcode_decoded(*op)?;
             let imm = handler.read_u8(words)?;
             handler.on_operand_decoded(0, Operand::ImmB { imm })?;
@@ -1051,7 +1162,7 @@ fn decode_inst<
     } else if opc == 0b0011_1000 {
         handler.on_opcode_decoded(Opcode::BRA)?;
         let imm = handler.read_u16(words)?;
-        handler.on_operand_decoded(0, Operand::ImmW { imm })?;
+        handler.on_operand_decoded(0, Operand::BrW { offset: imm as i16 })?;
     } else if opc == 0b0011_1001 {
         handler.on_opcode_decoded(Opcode::BSR)?;
         let imm = handler.read_u16(words)?;
@@ -1074,15 +1185,15 @@ fn decode_inst<
         match opc & 0b11 {
             0b00 => {
                 handler.on_operand_decoded(0, Operand::ImmB { imm: imm as u8 })?;
-                handler.on_operand_decoded(1, Operand::Deref { gpr: rd, disp, width: SizeCode::B })?;
+                handler.on_operand_decoded(1, Operand::Deref { gpr: rd, disp: disp * 1, width: SizeCode::B })?;
             }
             0b01 => {
                 handler.on_operand_decoded(0, Operand::ImmW { imm: imm as u8 as u16 })?;
-                handler.on_operand_decoded(1, Operand::Deref { gpr: rd, disp, width: SizeCode::W })?;
+                handler.on_operand_decoded(1, Operand::Deref { gpr: rd, disp: disp * 2, width: SizeCode::W })?;
             }
             0b10 => {
                 handler.on_operand_decoded(0, Operand::ImmL { imm: imm as u8 as u32 })?;
-                handler.on_operand_decoded(1, Operand::Deref { gpr: rd, disp, width: SizeCode::L })?;
+                handler.on_operand_decoded(1, Operand::Deref { gpr: rd, disp: disp * 4, width: SizeCode::L })?;
             }
             _ => { unreachable!("sz=11 is rtsd") }
         };
@@ -1126,6 +1237,11 @@ fn decode_inst<
                 handler.on_opcode_decoded(Opcode::RTSD)?;
                 handler.on_operand_decoded(0, Operand::ImmB { imm: operands })?;
             } else {
+                let opcode = [
+                    Opcode::SUB, Opcode::CMP, Opcode::ADD, Opcode::MUL,
+                    Opcode::AND, Opcode::OR, Opcode::MOV
+                ][opc as usize];
+                handler.on_opcode_decoded(opcode)?;
                 let imm = operands >> 4;
                 let rd = operands & 0b1111;
                 handler.on_operand_decoded(0, Operand::ImmB { imm })?;
@@ -1516,7 +1632,7 @@ fn decode_inst<
             let dispmid = (operands >> 6) & 2;
             let disphi = (opc & 0b111) << 2;
             let disp = displo | dispmid | disphi;
-            handler.on_operand_decoded(0, Operand::Deref { gpr: rs, disp: disp as u32, width: sz })?;
+            handler.on_operand_decoded(0, Operand::Deref { gpr: rs, disp: disp as u32 * sz.bytes() as u32, width: sz })?;
             handler.on_operand_decoded(1, Operand::Register { num: rd })?;
         } else {
             handler.on_opcode_decoded(Opcode::MOV)?;
@@ -1533,9 +1649,12 @@ fn decode_inst<
                 let disp = displo | dispmid | disphi;
                 if opc & 0b0000_1000  == 0 {
                     handler.on_operand_decoded(0, Operand::Register { num: rs })?;
-                    handler.on_operand_decoded(1, Operand::Deref { gpr: rd, disp: disp as u32, width: sz })?;
+                    handler.on_operand_decoded(1, Operand::Deref { gpr: rd, disp: disp as u32 * sz.bytes() as u32, width: sz })?;
                 } else {
-                    handler.on_operand_decoded(0, Operand::Deref { gpr: rs, disp: disp as u32, width: sz })?;
+                    // also swaps the meaning of the rs/rd fields in this encoding
+                    let rs = (operands >> 4) & 0b111;
+                    let rd = operands & 0b111;
+                    handler.on_operand_decoded(0, Operand::Deref { gpr: rs, disp: disp as u32 * sz.bytes() as u32, width: sz })?;
                     handler.on_operand_decoded(1, Operand::Register { num: rd })?;
                 }
             } else {
