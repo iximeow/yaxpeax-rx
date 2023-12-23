@@ -18,13 +18,13 @@ yaxpeax-arch = "0.2.7"
 members = ["."]
 
 [[bin]]
-name = "fuzz_target_1"
-path = "fuzz_targets/fuzz_target_1.rs"
+name = "no-panic"
+path = "fuzz_targets/no-panic.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "no-panic"
-path = "fuzz_targets/no-panic.rs"
+name = "fresh-decode"
+path = "fuzz_targets/fresh-decode.rs"
 test = false
 doc = false

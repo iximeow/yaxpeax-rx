@@ -22,6 +22,25 @@ pub struct Instruction {
     length: u8,
 }
 
+impl PartialEq for Instruction {
+    fn eq(&self, other: &Self) -> bool {
+        let Instruction {
+            opcode: left_opcode,
+            operands: _, // we won't use this `operands`, but `.operands()` to not use stale extra operands
+            length: left_length,
+        } = self;
+        let Instruction {
+            opcode: right_opcode,
+            operands: _, // we won't use this `operands`, but `.operands()` to not use stale extra operands
+            length: right_length,
+        } = other;
+
+        left_opcode == right_opcode &&
+            left_length == right_length &&
+            self.operands() == other.operands()
+    }
+}
+
 impl Instruction {
     pub fn opcode(&self) -> Opcode {
         self.opcode
