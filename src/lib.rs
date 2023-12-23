@@ -84,21 +84,14 @@ impl fmt::Display for Instruction {
         for op in ops {
             match op {
                 Operand::Nothing => {},
-                /// one of the 16 32-bit general purpose registers: `R0 (sp)` through `R15`.
                 Operand::Register { num: _ } => {},
-                /// a range of registers, from `start_gpr` to `end_gpr`
                 Operand::RegisterRange { start_gpr: _, end_gpr: _ } => {},
-                /// one of the 16 32-bit general purpose registers, but a smaller part of it. typically
-                /// sign-extended to 32b for processing.
                 Operand::Subreg { num: _, width } => {
                     size = Some(*width);
                     break;
                 },
                 Operand::Accumulator { num: _ } => {},
-                /// `bfmov` and `bfmovz`, textually, describe the bitfield to be moved with three parameters.
-                /// those three parameters are expressed as this one operand.
                 Operand::BitfieldSpec { bf_spec: _ } => {},
-                /// one of the 16 64-bit double-precision floating point registers: `DR0` through `DR15`.
                 Operand::DoubleReg { num: _ } => {},
                 Operand::DoubleRegLow { num: _ } => {},
                 Operand::DoubleRegHigh { num: _ } => {},
@@ -129,8 +122,6 @@ impl fmt::Display for Instruction {
                     size = Some(SizeCode::W);
                     break;
                 },
-                /// a 24-bit immediate. this is used as a branch offset, and is treated as a sign-extended
-                /// 24-bit value, so it is represented as that extended form here.
                 Operand::BrA { offset: _ } => {
                     size = Some(SizeCode::A);
                     break;
@@ -280,7 +271,9 @@ pub enum Operand {
     BitfieldSpec { bf_spec: BitfieldSpec },
     /// one of the 16 64-bit double-precision floating point registers: `DR0` through `DR15`.
     DoubleReg { num: u8 },
+    /// the low 32 bits of a double-precision floating point register.
     DoubleRegLow { num: u8 },
+    /// the high 32 bits of a double-precision floating point register.
     DoubleRegHigh { num: u8 },
     ControlReg { reg: ControlReg },
     PSWBit { bit: PSWBit },
@@ -290,17 +283,26 @@ pub enum Operand {
     Deref { gpr: u8, disp: u32, width: SizeCode },
     /// access to memory at the address produced by adding `gpr(base) + gpr(index) * size(width)`.
     DerefIndexed { base: u8, index: u8, width: SizeCode },
+    /// a range of double-precision floating point registers, from `start_gpr` to `end_gpr`
     DoubleRegisterRange { start_reg: u8, end_reg: u8 },
     DoubleControlRegisterRange { start_reg: u8, end_reg: u8 },
+    /// 8-bit immediate
     ImmB { imm: u8 },
+    /// 16-bit immediate
     ImmW { imm: u16 },
+    /// 32-bit immediate
+    ImmL { imm: u32 },
+    /// a branch offset in the range `[3, 10]`. this is the effective displacement of `pc`, not the
+    /// three bits stored in instructions using this operand.
     BrS { offset: u8 },
+    /// a signed 1-byte branch offset, `[-128, 127]`.
     BrB { offset: i8 },
+    /// a signed 1-byte branch offset, `[-32768, 32767]`.
     BrW { offset: i16 },
     /// a 24-bit immediate. this is used as a branch offset, and is treated as a sign-extended
-    /// 24-bit value, so it is represented as that extended form here.
+    /// 24-bit value, so it is represented as that extended form here. this branch offset can be in
+    /// the range `[-8388608, 8388607]`.
     BrA { offset: i32 },
-    ImmL { imm: u32 },
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
