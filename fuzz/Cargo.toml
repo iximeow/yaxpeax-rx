@@ -1,0 +1,30 @@
+[package]
+name = "yaxpeax-rx-fuzz"
+version = "0.0.0"
+authors = ["Automatically generated"]
+publish = false
+edition = "2018"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+yaxpeax-rx = { path = ".." }
+yaxpeax-arch = "0.2.7"
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_target_1"
+path = "fuzz_targets/fuzz_target_1.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "no-panic"
+path = "fuzz_targets/no-panic.rs"
+test = false
+doc = false

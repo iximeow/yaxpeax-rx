@@ -62,14 +62,14 @@ impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.opcode())?;
         let ops = self.operands();
-        if ops[0] != Operand::Nothing {
-            write!(f, " {}", ops[0])?;
+        if let Some(op) = ops.get(0) {
+            write!(f, " {}", op)?;
         }
-        if ops[1] != Operand::Nothing {
-            write!(f, ", {}", ops[1])?;
+        if let Some(op) = ops.get(1) {
+            write!(f, ", {}", op)?;
         }
-        if ops[2] != Operand::Nothing {
-            write!(f, ", {}", ops[2])?;
+        if let Some(op) = ops.get(2) {
+            write!(f, ", {}", op)?;
         }
         Ok(())
     }
@@ -725,6 +725,18 @@ impl Default for InstDecoder {
 }
 
 impl InstDecoder {
+    pub fn v1() -> Self {
+        Self { version: RxVersion::V1 }
+    }
+
+    pub fn v2() -> Self {
+        Self { version: RxVersion::V2 }
+    }
+
+    pub fn v3() -> Self {
+        Self { version: RxVersion::V3 }
+    }
+
     fn num_to_psw_bit(&self, reg: u8) -> Result<Operand, <RX as Arch>::DecodeError> {
         match reg {
             0b0000 => Ok(Operand::PSWBit { bit: PSWBit::C }),
