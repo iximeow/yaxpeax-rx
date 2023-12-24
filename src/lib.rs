@@ -210,6 +210,9 @@ pub enum ControlReg {
     FINTV,
     INTB,
     EXTB,
+    /// the four double-precision control registers listed here are in the same order they are
+    /// numbered for instructions like `dpushm`; `dpsw-depc` implies pushing all of `dpsw`, `dcmr`,
+    /// `decnt`, `depc`.
     DPSW,
     DCMR,
     DECNT,
@@ -299,7 +302,7 @@ pub enum Operand {
     DerefIndexed { base: u8, index: u8, width: SizeCode },
     /// a range of double-precision floating point registers, from `start_gpr` to `end_gpr`
     DoubleRegisterRange { start_reg: u8, end_reg: u8 },
-    DoubleControlRegisterRange { start_reg: u8, end_reg: u8 },
+    DoubleControlRegisterRange { start_reg: ControlReg, end_reg: ControlReg },
     /// 8-bit immediate
     ImmB { imm: u8 },
     /// 16-bit immediate
@@ -414,8 +417,7 @@ impl fmt::Display for Operand {
                 write!(f, "dr{}-dr{}", start_reg, end_reg)
             }
             Operand::DoubleControlRegisterRange { start_reg, end_reg } => {
-                // TODO: give the control registers names...
-                write!(f, "dcr{}-dcr{}", start_reg, end_reg)
+                write!(f, "{}-{}", start_reg, end_reg)
             }
             Operand::BrS { offset } => {
                 // a short branch `disp` bytes forward
@@ -861,8 +863,11 @@ pub struct InstDecoder {
 }
 
 impl Default for InstDecoder {
+    /// the default version of a `yaxpeax_rx::InstDecoder` is to decode as RX v3. this is
+    /// backwards-compatible with older versions; it will decode code that is entirely RX v1 in the
+    /// same way an RX v1 processor would decode it.
     fn default() -> Self {
-        InstDecoder { version: RxVersion::V3 }
+        Self::v3()
     }
 }
 
@@ -1481,7 +1486,17 @@ fn decode_inst<
                 if end_reg > 15 {
                     return Err(StandardDecodeError::InvalidOperand);
                 }
-                handler.on_operand_decoded(0, Operand::DoubleControlRegisterRange { start_reg: rs, end_reg })?;
+                let start_reg = if let Operand::ControlReg { reg } = decoder.reg_to_double_control_reg(rs)? {
+                    reg
+                } else {
+                    panic!("impossible operand for double-precision control reg?");
+                };
+                let end_reg = if let Operand::ControlReg { reg } = decoder.reg_to_double_control_reg(end_reg)? {
+                    reg
+                } else {
+                    panic!("impossible operand for double-precision control reg?");
+                };
+                handler.on_operand_decoded(0, Operand::DoubleControlRegisterRange { start_reg, end_reg })?;
             } else if opc == 0b1011 {
                 // dpushm.d/dpopm.d
                 let opc = if rd == 0b000 {
