@@ -1,3 +1,17 @@
+//! renesas `rx` decoder implemented as part of the `yaxpeax` project. implements traits provided
+//! by `yaxpeax-arch`.
+//!
+//! decoder is aware of `rx` versions 1, 2, and 3, and is built from the following manuals:
+//! `rxv1`: RX Family RXv1 Instruction Set Architecture (User's Manual: Software), Rev. 1.30 (Dec 2019)
+//! * retrieved 2023-12-16 from https://www.renesas.com/us/en/document/mas/rx-family-rxv1-instruction-set-architecture-users-manual-software-rev130
+//! * sha256: `e659dd509141da6bb1cfabf26c9f9ab5996d02060acaad2b5702963116834415`
+//! `rxv2`: RX Family RXv2 Instruction Set Architecture (User's Manual: Software), Rev. 1.00 (Nov 2013)
+//! * retrieved 2023-12-16 from https://www.renesas.com/us/en/document/mas/rx-family-rxv2-instruction-set-architecture-users-manual-software
+//! * sha256: `c12fc8d16adf1530f2cad3f75974d2a29062580a984a71fd9461417b66bba18a`
+//! `rxv3`: RX Family RXv3 Instruction Set Architecture (User's Manual: Software), Rev. 1.00 (Nov 2018)
+//! * retrieved 2023-12-16 from https://www.renesas.com/us/en/document/mas/rx-family-rxv3-instruction-set-architecture-users-manual-software-rev100
+//! * sha256: `829815515a57d077bdfa418e0e167b512f2a04b3db3613329a4d8980399cf74c`
+
 use core::fmt;
 use core::cmp;
 
