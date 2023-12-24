@@ -1,7 +1,7 @@
 ## yaxpeax-rx
 
-[![crate](https://img.shields.io/crates/v/yaxpeax-x86.svg?logo=rust)](https://crates.io/crates/yaxpeax-x86)
-[![documentation](https://docs.rs/yaxpeax-x86/badge.svg)](https://docs.rs/yaxpeax-x86)
+[![crate](https://img.shields.io/crates/v/yaxpeax-rx.svg?logo=rust)](https://crates.io/crates/yaxpeax-rx)
+[![documentation](https://docs.rs/yaxpeax-rx/badge.svg)](https://docs.rs/yaxpeax-rx)
 
 renesas rx decoder implementedf as part of the yaxpeax project, implementing traits provided by `yaxpeax-arch`.
 
