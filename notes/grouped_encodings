@@ -1,0 +1,449 @@
+0 0 0 0 0 0 0 0                                                       BRK (v1, v2, v3)
+
+0 0 0 0 0 0 1 0                                                       RTS (v1, v2, v3)
+
+0 0 0 0 0 0 1 1                                                       NOP (v1, v2, v3)
+
+0 0 0 0 0 1 0 0 | [ pcdsp:24 ]                                        BRA.A src (v1, v2, v3)
+
+0 0 0 0 0 1 0 1 | [ pcdsp:24 ]                                        BSR.A src (v1, v2, v3)
+
+0 0 0 0 0 1 1 0 | mi  [ opc ] ld  | [ rs  ] [ rd  ]                   SUB src, dest (v1, v2, v3)
+                  0 0 => B    0 0 => [Rs]
+                  0 1 => W    0 1 => dsp:8[Rs]
+                  1 0 => L    1 0 => dsp:16[Rs]
+                  1 1 => UW   1 1 => Rs
+    opc={sub, cmp, add, mul, and, or, X, X, see below}
+
+0 0 0 0 0 1 1 0 | mi  1 0 0 0 ld  | 0 0 0 [  opc  ] | [ rs  ] [ rd  ] SBB src, dest (v1, v2, v3)
+                  1 0 => L
+                  _ _ => invalid
+                              00 => [Rs]
+                              01 => dsp:8[Rs]
+                              10 => dsp:16[Rs]
+    opc={
+      sbb(mi=10,ld!=11), X, adc(mi=10,ld!=11), X,
+      max, min, emul, emulu,
+      div, divu, X, X
+      tst, xor, X, X,
+      xchg, itof, X, X,
+      X, utof(v2, v3), X, X,
+      X, X, X, X,
+      X, X, X, X,
+    }
+
+0 0 0 0 1 [dsp]                                                       BRA.S src (v1, v2, v3)
+
+0 0 0 1 c [dsp]                                                       BCnd.S src (v1, v2, v3)
+        0 => beq/bz   (src = if dsp > 2 { dsp } else { dsp + 8 })
+        1 => bne/bnz
+
+0 0 1 0 [ cnd ] | [    pcdsp    ]                                     BCnd.B src (v1, v2, v3)
+        cnd => {eq, ne, geu, ltu, gtu, leu, pz, n, ge, lt, gt, le, o, no, bra.b, Reserved}
+
+0 0 1 0 1 1 1 0 | [    pcdsp    ]                                     BRA.B src (v1, v2, v3)
+  (bcnd.b w/ cnd = 1110)
+
+0 0 1 1 1 0 0 0 | [             pcdsp:16          ]                   BRA.W src (v1, v2, v3)
+
+0 0 1 1 1 0 0 1 | [ pcdsp:16 ]                                        BSR.W src (v1, v2, v3)
+
+0 0 1 1 1 0 1 c | [             pcdsp:16          ]                   BCnd.W src (v1, v2, v3)
+              0 => beq
+              1 => bne
+
+0 0 1 1 1 1 sz  | d [rdd] i s p p                                     MOV.size src, dest (v1, v2, v3)
+            00 => B   dispp: 5bit
+            01 => W   "rdd" is 3-bit selector of r0..r7
+            10 => L
+
+0 0 1 1 1 1 1 1 | [ rd  ] [ rd2 ] | uimm8                             RTSD src, dest-dest2 (v1, v2, v3)
+
+0 1 0 [opc] ld  | [ rs  ] [ rd  ]                                     SUB src, dest (v1, v2, v3)
+            0 0 => [Rs]
+            0 1 => dsp:8[Rs]
+            1 0 => dsp:16[Rs]
+            1 1 => Rs
+    opc={sub, cmp, add, mul, and, or}
+
+0 1 0 1 1 S ld  | [ rs  ] [ rd  ]                                     MOVU.size src, dest (v1, v2, v3)
+    S:0 => B
+    S:1 => W
+
+0 1 1 0 0 [opc] | [ imm ] [ rd  ]                                     SUB src, dest (v1, v2, v3)
+
+    opc={sub, cmp, add, mul, and, or, mov.size(??), see RTSD}
+
+0 1 1 0 0 1 1 1 | uimm8                                               RTSD src (v1, v2, v3)
+
+0 1 1 0 1 0 0 i | m m m 5 [ rd  ]                                     SHLR src, dest (v1, v2, v3)
+  immm5: 5-bit immediate (rotate amount)
+
+0 1 1 0 1 0 1 i | m m m 5 [ rd  ]                                     SHAR src, dest (v1, v2, v3)
+  immm5: 5-bit immediate (rotate amount)
+
+0 1 1 0 1 1 0 i | m m m 5 [ rd  ]                                     SHLL src, dest (v1, v2, v3)
+  immm5: 5-bit immediate (rotate amount)
+
+0 1 1 0 1 1 1 0 | [ rs  ] [ rs2 ]                                     PUSHM src-src2 (v1, v2, v3)
+
+0 1 1 0 1 1 1 1 | [ rd  ] [ rd2 ]                                     POPM dest-dest2 (v1, v2, v3)
+  rd:  0001 to 1110
+  rd2: 0010 to 1111
+
+0 1 1 1 0 0 li  | [ rs2 ] [ rd  ]                                     ADD src, src2, dest (v1, v2, v3)
+            0 1 => [simm:8]
+            1 0 => [simm:16]
+            1 1 => [simm:24]
+            0 0 => [imm:32]
+
+0 1 1 1 0 1 li  | [ opc ] [ rs2 ]                                     CMP src, src2 (v1, v2, v3)
+            0 1 => [simm:8]
+            1 0 => [simm:16]
+            1 1 => [simm:24]
+            0 0 => [imm:32]
+    opc={cmp, mul, and, or}
+
+0 1 1 1 0 1 0 1 | 0 1 0 0 [ rd  ] | [ uimm:8 ]                        MOV.size src, dest (v1, v2, v3)
+
+0 1 1 1 0 1 0 1 | 0 1 0 1 [ rs2 ] | [ uimm:8 ]                        CMP src, src2 (v1, v2, v3)
+
+0 1 1 1 0 1 0 1 | 0 1 1 0 0 0 0 0 | [ imm8 ]                          INT (v1, v2, v3)
+
+0 1 1 1 0 1 0 1 | 0 1 1 1 0 0 0 0 | 0 0 0 0 [ imm ]                   MVTIPL src (v1, v2, v3)
+
+0 1 1 1 0 1 0 1 | 1 0 0 1 0 0 0 0 | 0 0 0 1 1 0 1 1                   MVFDR (v3)
+
+0 1 1 1 0 1 0 1 | 1 0 1 0 0 0 0 0 | [ rd  ] [ nm  ]                   DPUSHM.L dest-dest2 (v3)
+  rs={ DPSW, DCMR, DECNT, DEPC }
+
+0 1 1 1 0 1 0 1 | 1 0 1 0 1 0 0 0 | [ rd  ] [ nm  ]                   DPOPM.L dest-dest2 (v3)
+  rs={ DPSW, DCMR, DECNT, DEPC }
+
+0 1 1 1 0 1 0 1 | 1 0 1 1 0 0 0 0 | [ rs  ] [ nm  ]                   DPUSHM.D dest-dest2 (v3)
+                                      rs=DRd, nm=0..1111 minus 1
+
+0 1 1 1 0 1 0 1 | 1 0 1 1 1 0 0 0 | [ rs  ] [ nm  ]                   DPOPM.D dest-dest2 (v3)
+                                      rs=DRd, nm=0..1111 minus 1
+
+0 1 1 1 0 1 1 0 | 1 0 0 1 0 0 0 0 | [ rs2 ] [ opc ] | [ rd  ] [ rs  ] DADD src, src2, dest (v3)
+    opc={dadd, dsub, dmul, X, ddiv, X, X, DCMPcm(notes), X, X, X, see below}
+    DCMPcm: rd=cm={X, UN, EQ, X, LT, X, LE, X}
+
+0 1 1 1 0 1 1 0 | 1 0 0 1 0 0 0 0 | [ rs  ] 1 1 0 0 | [ rd  ] [ opc ] DMOV.D src, dest (v3) # exchanges D{Rs,Rd}
+    opc={dmov.d, dabs, dneg, X, X..}
+
+0 1 1 1 0 1 1 0 | 1 0 0 1 0 0 0 0 | [ rs  ] 1 1 0 1 | [ rd  ] [ opc ] DSQRT src, dest (v3)
+    opc={dsqrt, X, X, X, X, X, X, X, dtoi, dtou, X, X, dtof, dround, X, X}
+
+0 1 1 1 1 0 0 [  imm5  ]  [ rd  ]                                     BSET src, dest (v1, v2, v3)
+
+0 1 1 1 1 0 1 [  imm5  ]  [ rd  ]                                     BCLR src, dest (v1, v2, v3)
+
+0 1 1 1 1 1 0 [  imm5  ]  [ rs  ]                                     BTST src, src2 (v1, v2, v3)
+
+0 1 1 1 1 1 1 0 | 0 [opc] [ rd  ]                                     NOT (v1, v2, v3)
+    opc={not, neg, abs, sat, rorc, rolc, X, X}
+
+0 1 1 1 1 1 1 0 | 1 0 sz  [ rd  ]                                     PUSH.size src (v1, v2, v3)
+                      00 => B
+                      01 => W
+                      10 => L
+
+0 1 1 1 1 1 1 0 | 1 0 1 1 [ rd  ]                                     POP dest (v1, v2, v3)
+
+0 1 1 1 1 1 1 0 | 1 1 0 0 [ cr  ]                                     PUSHC src (v1)
+  cr = { psw, pc, usp, fpsw, X, X, X, X, bpsw, bpc, isp, fintv, intb, X }
+                                                                  ... , extb, X } (v2, v3)
+
+0 1 1 1 1 1 1 0 | 1 1 1 0 [ rd  ]                                     POPC dest (v1)
+  cr = { psw, X, usp, fpsw, X, X, X, X, bpsw, bpc, isp, fintv, intb, X }
+                                                                  ... , extb, X } (v2, v3)
+
+0 1 1 1 1 1 1 1 | 0 0 0 0 [ rs  ]                                     JMP src (v1, v2, v3)
+
+0 1 1 1 1 1 1 1 | 0 0 0 1 [ rs  ]                                     JSR src (v1, v2, v3)
+
+0 1 1 1 1 1 1 1 | 0 1 0 0 [ rs  ]                                     BRA.L src (v1, v2, v3)
+
+0 1 1 1 1 1 1 1 | 0 1 0 1 [ rs  ]                                     BSR.L src (v1, v2, v3)
+
+0 1 1 1 1 1 1 1 | 1 0 0 0 0 0 sz                                      SUNTIL.size (v1, v2, v3)
+  sz = { B, W, L }
+
+0 1 1 1 1 1 1 1 | 1 0 0 0 0 0 1 1                                     SCMPU (v1, v2, v3)
+
+0 1 1 1 1 1 1 1 | 1 0 0 0 0 1 sz                                      SWHILE.size (v1, v2, v3)
+  sz = { B, W, L }
+
+0 1 1 1 1 1 1 1 | 1 0 0 0 0 1 1 1                                     SMOVU (v1, v2, v3)
+
+0 1 1 1 1 1 1 1 | 1 0 0 0 1 0 sz                                      SSTR.size (v1, v2, v3)
+  sz = { B, W, L, X }
+
+0 1 1 1 1 1 1 1 | 1 0 0 0 1 0 1 1                                     SMOVB (v1, v2, v3)
+
+0 1 1 1 1 1 1 1 | 1 0 0 0 1 1 sz                                      RMPA.size (v1, v2, v3)
+                              00: B
+                              01: W
+                              10: L
+
+0 1 1 1 1 1 1 1 | 1 0 0 0 1 1 1 1                                     SMOVF (v1, v2, v3)
+
+0 1 1 1 1 1 1 1 | 1 0 0 1 0 0 1 1                                     SATR (v1, v2, v3)
+
+0 1 1 1 1 1 1 1 | 1 0 0 1 0 1 0 0                                     RTFI (v1, v2, v3)
+
+0 1 1 1 1 1 1 1 | 1 0 0 1 0 1 0 1                                     RTE (v1, v2, v3)
+
+0 1 1 1 1 1 1 1 | 1 0 0 1 0 1 1 0                                     WAIT (v1, v2, v3)
+
+0 1 1 1 1 1 1 1 | 1 0 1 0 [ cb  ]                                     SETPSW (v1, v2, v3)
+  cb = { c, z, s, o, X, X, X, X, i, u, X...}
+
+0 1 1 1 1 1 1 1 | 1 0 1 1 [ cb  ]                                     CLRPSW (v1, v2, v3)
+  cb = { c, z, s, o, X, X, X, X, i, u, X, X, X, X, X, X }
+
+1 0 sz  0 d i s | p [rdd] p [rss]                                     MOV.size src, dest (v1, v2, v3)
+    00 => B   dispp: 5bit
+    01 => W   "rdd" is 3-bit selector of r0..r7
+    10 => L   "rss" is 3-bit selector of r0..r7
+
+1 0 sz  1 d i s | p [rss] p [rdd]                                     MOV.size src, dest (v1, v2, v3)
+    00 => B   dispp: 5bit
+    01 => W   "rss" is 3-bit selector of r0..r7
+    10 => L   "rdd" is 3-bit selector of r0..r7
+
+1 0 1 1 S d i s | p [rss] p [rdd]                                     MOVU.size src, dest (v1, v2, v3)
+    S:0 => B    dispp: 5-bit displacement
+    S:1 => W    "rdd", "rss" 3-bit selectors of r0..r7
+
+1 1 sz  ldd lds | [ rd  ] [ rs  ]                                     MOV.size src, dest (v1, v2, c3)
+    00 => B  ld{s,d}:00 => [Rd]
+    01 => W  ld{s,d}:01 => dsp:8[Rd]
+    10 => L  ld{s,d}:10 => dsp:16[Rd]
+
+1 1 sz  ld  1 1 | [ rd  ] [ rs  ]                                     MOV.size src, dest (v1, v2, v3)
+    00 => B  ld:00 => [Rd]
+    01 => W  ld:01 => dsp:8[Rd]
+    10 => L  ld:10 => dsp:16[Rd]
+
+1 1 sz  1 1 ld  | [ rs  ] [ rd  ]                                     MOV.size src, dest (v1, v2, v3)
+    00 => B 00 => [Rs]
+    01 => W 01 => dsp:8[Rs]
+    10 => L 10 => dsp:16[Rs]
+            11 => Rs
+
+1 1 1 1 0 0 ld  | [ rd  ] 0 [imm]                                     BSET src, dest (v1, v2, v3)
+            0 0 => [Rd]
+            0 1 => dsp:8[Rd]
+            1 0 => dsp:16[Rd]
+
+1 1 1 1 0 0 ld  | [ rd  ] 1 [imm]                                     BCLR src, dest (v1, v2, v3)
+            0 0 => [Rd]
+            0 1 => dsp:8[Rd]
+            1 0 => dsp:16[Rd]
+
+1 1 1 1 0 1 ld  | [ rs2 ] 0 [imm]                                     BTST src, src2 (v1, v2, v3)
+            0 0 => [Rs2]
+            0 1 => dsp:8[Rs2]
+            1 0 => dsp:16[Rs2]
+
+1 1 1 1 0 1 ld  | [ rs  ] 1 0 sz                                      PUSH.size src (v1, v2, v3)
+            00 => [Rs]        00 => B
+            01 => dsp:8[Rs]   01 => W
+            10 => dsp:16[Rs]  10 => L
+
+1 1 1 1 1 0 ld  | [ rd  ] li  sz                                      MOV.size src, dest (v1, v2, v3)
+            00 => [Rd]        li:01 => simm:8   sz:00 => B
+            01 => dsp:8[Rd]   li:10 => simm:16  sz:01 => W
+            10 => dsp:16[Rd]  li:11 => simm:24  sz:10 => L
+                              li:00 => imm:32
+
+1 1 1 1 1 0 0 1 | 0 0 0 0 0 0 1 1 | [ rd  ] 0 0 0 0 | imm32           DMOV.L src, dest (v3) # stores to DRLd
+
+1 1 1 1 1 0 0 1 | 0 0 0 0 0 0 1 1 | [ rd  ] 0 0 1 0 | imm32           DMOV.L src, dest (v3) # stores to DRHd
+
+1 1 1 1 1 0 0 1 | 0 0 0 0 0 0 1 1 | [ rd  ] 0 0 1 1 | imm32           DMOV.D src, dest (v3) # stores to DRHd
+
+1 1 1 1 1 0 1 1 | [ rd  ] li  1 0                                     MOV.size src, dest (v1, v2, v3)
+                          0 1                       [simm:8]
+                          1 0                       [simm:16]
+                          1 1                       [simm:24]
+                          0 0                       [imm:32]
+
+1 1 1 1 1 1 0 0 | 0 [ opc5  ] ld  | [ rs  ] [ rd  ]                   SBB src, dest (v1, v2, v3)
+                              00 => [Rs]
+                              01 => dsp:8[Rs]
+                              10 => dsp:16[Rs]
+                              11 => Rs
+    opc5={
+      sbb(ld=11), neg(ld=11), adc(ld=11), abs(ld=11),
+      max, min, emul, emulu,
+      div, divu, X, X,
+      tst, xor, not(ld=11), X,
+      xchg(verify:opc=16), itof, X..}
+
+1 1 1 1 1 1 0 0 | 0 1 0 0 1 0 1 1 | [ rs  ] [ rd  ]                   STZ src, dest (v2, v3) # manual has typo: stnz encoding 2 is the same as stz encoding 2. 6p did some digging in binutils to find the right one
+  # AND ITS STILL THERE IN V3
+
+1 1 1 1 1 1 0 0 | 0 1 0 0 1 1 1 1 | [ rs  ] [ rd  ]                   STNZ src, dest (v2, v3) # manual has typo: stnz encoding 2 is the same as stz encoding 2. 6p did some digging in binutils to find the right one
+  # AND ITS STILL THERE IN V3
+
+1 1 1 1 1 1 0 0 | 0 1 0 1 0 1 ld  | [ rs  ] [ rd  ]                   UTOF (v2, v3)
+
+1 1 1 1 1 1 0 0 | 0 1 0 1 1 0 1 0 | [ rs  ] [ rd  ] imm:16            BFMOVZ slsb, dlsb, width, src, dest (v3)
+
+1 1 1 1 1 1 0 0 | 0 1 0 1 1 1 1 0 | [ rs  ] [ rd  ] imm:16            BFMOV slsb, dlsb, width, src, dest (v3)
+
+1 1 1 1 1 1 0 0 | 0 1 1 0 opc ld  | [ rd  ] [ rs  ]                   BNOT src, dest (v1, v2, v3)
+                              0 0 => [Rd]
+                              0 1 => dsp:8[Rd]
+                              1 0 => dsp:16[Rd]
+                              1 1 => Rd
+    opc={bset, bclr, btst, bnot}
+
+1 1 1 1 1 1 0 0 | 0 1 1 1 1 0 ld  | [ rd  ] 1 0 0 0 |ld/none|[rs]0000 DMOV.D src, dest (v3) # displacement on dest scaled by 8
+
+1 1 1 1 1 1 0 0 | 1 0 [ opc ] ld  | [ rs  ] [ rd  ]                   FSUB src, dest (v1, v2, v3)
+                              00 => [Rs]
+                              01 => dsp:8[Rs]
+                              10 => dsp:16[Rms]
+                              11 => Rs
+    opc={
+      fsub, fcmp, fadd, fmul,
+      fdiv, ftoi, round, X,
+      fsqrt(v2,v3), ftou(v2,v3), X, X,
+      X, X, X, X
+    }
+
+1 1 1 1 1 1 0 0 | 1 1 0 0 1 0 ld  | [ rs  ] 1 0 0 0 |ld/none|[rd]0000 DMOV.D src, dest (v3) # displacement on dest scaled by 8
+
+1 1 1 1 1 1 0 0 | 1 1 0 1 sz  ld  | [ rd  ] [ cnd ]                   SCCnd.size dest (v1, v2, v3)
+  cnd = { eq, ne, geu, ltu, gtu, leu, pz, n, ge, lt, gt, le, o, no, X, X }
+  ld = { [Rd], dsp:8[Rd], dsp:16[Rd], Rd }
+  sz = { B, W, L, X }
+
+
+1 1 1 1 1 1 0 0 | 1 1 1 [imm] ld  | [ rd  ] [ cnd ]                   BMCnd src, dest (v1, v2, v3)
+                              0 0 => [Rd]
+                              0 1 => dsp:8[Rd]
+                              1 0 => dsp:16[Rd]
+        cnd => {eq, ne, geu, ltu, gtu, leu, pz, n, ge, lt, gt, le, o, no, Reserved, Reserved}
+        cnd => 1111 see BNOT
+
+
+1 1 1 1 1 1 0 0 | 1 1 1 [imm] ld  | [ rd  ] 1 1 1 1                   BNOT src, dest (v1, v2, 3)
+
+1 1 1 1 1 1 0 1 | 0 0 0 0 0 [opc] | [ rs  ] [ rs2 ]                   MULHI src, src2 (v1)
+                          a                                           (v2, v3), a={A0, A1}
+    opc={mulhi, mullo, mullh(v2,v3), emula(v2,v3), machi, maclo, maclh(v2,v3), emaca(v2,v3)
+
+1 1 1 1 1 1 0 1 | 0 0 0 1 0 1 1 1 | 0 0 0 0 [ rs  ]                   MVTACHI src (v1)
+                                    a                                 (v2, v3), a={A0, A1}
+
+1 1 1 1 1 1 0 1 | 0 0 0 1 0 1 1 1 | 0 0 0 1 [ rs  ]                   MVTACLO src (v1)
+                                    a                                 (v2, v3), a={A0, A1}
+
+1 1 1 1 1 1 0 1 | 0 0 0 1 0 1 1 1 | a 0 1 1 [ rs  ]                   MVTACGU src, Adest (v2, v3)
+
+1 1 1 1 1 1 0 1 | 0 0 0 1 1 0 0 0 | 0 0 0 I 0 0 0 0                   RACW src (v1)
+                                          0: 1
+                                          1: 2
+                                    a={A0, A1}                        (v2, v3)
+
+1 1 1 1 1 1 0 1 | 0 0 0 1 1 0 0 0 | a 1 0 I 0 0 0 0                   RDACW src (v2, v3)
+                                    0: A0 0: 1
+                                    1: A1 1: 2
+
+1 1 1 1 1 1 0 1 | 0 0 0 1 1 0 0 1 | a 0 0 I 0 0 0 0                   RACL src (v2, v3)
+                                    0: A0 0: 1
+                                    1: A1 1: 2
+
+1 1 1 1 1 1 0 1 | 0 0 0 1 1 0 0 1 | a 1 0 I 0 0 0 0                   RDACL src (v2, v3)
+                                    0: A0 0: 1
+                                    1: A1 1: 2
+
+1 1 1 1 1 1 0 1 | 0 0 0 1 1 1 1 1 | 0 0 opc [ rd  ]                   MVFACHI dest (v1)
+                                i   a i                                       src, Asrc, dest (v2, v3)
+              ii={2, X, 0, 1} a={A0, A1}
+    opc={mvfachi, mvfaclo, mvfacmi, mvfacgu}
+
+1 1 1 1 1 1 0 1 | 0 1 0 0 a 1 opc | [ rs  ] [ rs2 ]                   MSBHI src, src2, Adest (v2, v3)
+                          a={A0, A1}
+    opc={msbhi, msblh, msblo, emsba}
+
+1 1 1 1 1 1 0 1 | 0 1 1 0 0 [opc] | [ rs  ] [ rd  ]                   SHLR src, dest (v1, v2, v3)
+    opc={shlr, shar, shll, X, rotr, revw, rotl, revl}
+
+1 1 1 1 1 1 0 1 | 0 1 1 0 1 0 0 0 | [ rs  ] [ cr  ]                   MVTC src, dest (v1)
+    cr = { psw, X, usp, fpsw, X, X, X, X, bpsw, bpc, isp, fintv, intb, X }
+                                                                  ... , extb, X } (v2, v3)
+
+1 1 1 1 1 1 0 1 | 0 1 1 0 1 0 1 0 | [ cr  ] [ rd  ]                   MVFC src, dest (v1)
+    cr = { psw, pc, usp, fpsw, X, X, X, X, bpsw, bpc, isp, fintv, intb, X }
+                                                                  ... , extb, X } (v2, v3)
+
+1 1 1 1 1 1 0 1 | 0 1 1 0 1 1 0 i | m m m 5 [ rd  ]                   ROTR src, dest (v1, v2, v3)
+  immm5: 5-bit immediate (rotate amount)
+
+1 1 1 1 1 1 0 1 | 0 1 1 0 1 1 1 i | m m m 5 [ rd  ]                   ROTL src, dest (v1, v2, v3)
+  immm5: 5-bit immediate (rotate amount)
+
+1 1 1 1 1 1 0 1 | 0 1 1 1 0 1 0 1 | 1 0 0 0 [ rd  ] | [ rs  ] 0 0 0 0 DMOV.L src, dest (v3) # stores from DRLs
+
+1 1 1 1 1 1 0 1 | 0 1 1 1 0 1 0 1 | 1 0 0 0 [ rd  ] | [ rs  ] 0 0 1 0 DMOV.L src, dest (v3) # stores from DRHs
+
+1 1 1 1 1 1 0 1 | 0 1 1 1 0 1 0 1 | 1 0 0 0 [ rd  ] | [ rs  ] 0 1 0 0 MVFDC src, dest (v3)
+
+1 1 1 1 1 1 0 1 | 0 1 1 1 0 1 1 0 | 1 1 0 0 [ rs  ] | 0 0 0 0 0 0 0 0 SAVE src (v3)
+
+1 1 1 1 1 1 0 1 | 0 1 1 1 0 1 1 0 | 1 1 0 1 [ rs  ] | 0 0 0 0 0 0 0 0 RSTR src (v3)
+
+1 1 1 1 1 1 0 1 | 0 1 1 1 0 1 1 0 | 1 1 1 0 0 0 0 0 | uimm8           SAVE src (v3)
+
+1 1 1 1 1 1 0 1 | 0 1 1 1 0 1 1 0 | 1 1 1 1 0 0 0 0 | uimm8           RSTR src (v3)
+
+1 1 1 1 1 1 0 1 | 0 1 1 1 0 1 1 1 | 1 0 0 0 [ rs  ] | [ rd  ] [ opc ] DMOV.L src, dest (v3) # stores to DRLd
+  opc={dmov.l, X, dmov.l, dmov.d, mvtdc, X, X, X, X, itod, ftod, X, X, utod, X..}
+    MVTDC ONLY: rd={ dpsw, dcmr, decnt, depc }
+
+1 1 1 1 1 1 0 1 | 0 1 1 1 il  0 0 | [ opc ] [ rd  ]                   ADC src, dest (v1, v2, v3)
+                          0 1                       [simm:8]
+                          1 0                       [simm:16]
+                          1 1                       [simm:24]
+                          0 0                       [imm:32]
+    opc={X, X, adc, X, max, min, emul, emulu, div, divu, X, X, tst, xor, stz, stnz}
+
+1 1 1 1 1 1 0 1 | 0 1 1 1 0 0 1 0 | 0 [opc] [ rd  ] | [ imm:32 ]      FSUB src, dest (v1, v2, v3)
+    opc={fsub, fcmp, fadd, fmul, fdiv, X..}
+
+1 1 1 1 1 1 0 1 | 0 1 1 1 li  1 1 | 0 0 0 0 [ cr  ]                   MVTC src, dest (v1)
+    cr = { psw, X, usp, fpsw, X, X, X, X, bpsw, bpc, isp, fintv, intb, X }
+                                                                  ... , extb, X } (v2, v3)
+
+1 1 1 1 1 1 0 1 | 1 opc [ imm5  ] | [ rs2 ] [ rd  ]                   SHLR src, src2, dest (v1, v2, v3)
+    opc={slhr, shar, shll, see BMCnd}
+
+1 1 1 1 1 1 0 1 | 1 1 1 [ imm5  ] | [ cnd ] [ rd  ]                   BMCnd src, dest (v1, v2, v3)
+        cnd => {eq, ne, geu, ltu, gtu, leu, pz, n, ge, lt, gt, le, o, no, Reserved, Reserved}
+        cnd => 1111 see BNOT
+
+1 1 1 1 1 1 0 1 | 1 1 1 [ imm5  ] | 1 1 1 1 [ rd  ]                   BNOT src, dest (v1, v2, v3)
+
+1 1 1 1 1 1 1 0 | 0 0 sz  [ ri  ] | [ rb  ] [ rs  ]                   MOV.size src, dest (v1, v2, v3)
+                      00 => B
+                      01 => W
+                      10 => L
+
+1 1 1 1 1 1 1 0 | 0 1 sz  [ ri  ] | [ rb  ] [ rd  ]                   MOV.size src, dest (v1, v2, v3)
+                      00 => B
+                      01 => W
+                      10 => L
+
+1 1 1 1 1 1 1 0 | 1 1 0 S [ ri  ] | [ rb  ] [ rd  ]                   MOVU.size src, dest (v1, v2, v3)
+    S:0 => B
+    S:1 => W
+
+1 1 1 1 1 1 1 1 | [ opc ] [ rd  ] | [ rs  ] [ rs2 ]                   SUB src, src2, dest (v1, v2, v3)
+  opc = { sub, X, add, mul, and, or, xor (v3), X, fsub (v2, 3), X, fadd (v2, 3), fmul (v2, 3), X.. }
